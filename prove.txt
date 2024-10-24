@@ -1,0 +1,4 @@
+python entrypoint_predict.py --name nonso --options experiments/default/resnet.yml --checkpoint checkpoints/resnet.pth.tar --folder datasets/examples/
+
+
+python entrypoint_predict.py --options /path/to/yml --checkpoint /path/to/checkpoint --folder /path/to/images
