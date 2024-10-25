@@ -112,7 +112,7 @@ class GProjection(nn.Module):
             output = torch.stack([self.project_tensorflow(points_h[i], points_w[i],
                                                           feature_shape, img_feat[i]) for i in range(img_feat.size(0))], 0)
         else:
-            output = F.grid_sample(img_feat, sample_points.unsqueeze(1))
+            output = F.grid_sample(img_feat, sample_points.unsqueeze(1)) # questo dovrebbe prendere un solo elemento per matrice di feature!
             output = torch.transpose(output.squeeze(2), 1, 2)
 
         return output

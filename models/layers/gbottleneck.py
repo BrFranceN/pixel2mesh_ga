@@ -44,3 +44,8 @@ class GBottleneck(nn.Module):
         x_out = self.conv2(x_hidden)
 
         return x_out, x_hidden
+    
+
+
+# # class that use geometric algebra
+# class

@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import sys # for stopping whenever I want!
+
 from models.backbones import get_backbone
 from models.layers.gbottleneck import GBottleneck
 from models.layers.gconv import GConv
@@ -52,31 +54,64 @@ class P2MModel(nn.Module):
         img_feats = self.nn_encoder(img)
         img_shape = self.projection.image_feature_shape(img)
 
+        print(f"batch_size -> {batch_size} ")
+        print(f"img_feats len -> {len(img_feats)} ")
+        print(f"img_feats 0 shape  -> {img_feats[0].shape} ")
+        print(f"img_feats 1 shape  -> {img_feats[1].shape} ")
+        print(f"img_feats 2 shape  -> {img_feats[2].shape} ")
+        print(f"img_feats 3 shape  -> {img_feats[3].shape} ")
+        print(f"img_shape type -> {type(img_shape)} ")
+        print(f"img_shape -> {img_shape} ")
+
         init_pts = self.init_pts.data.unsqueeze(0).expand(batch_size, -1, -1)
+
+        print(f"init pts -> {type(init_pts)} ")
+        print(f"init pts -> {init_pts.shape} ")
+        print("START GCN BLOCK 1")
         # GCN Block 1
         x = self.projection(img_shape, img_feats, init_pts)
+        print(f"x GCN Block 1 -> {x.shape}")
         x1, x_hidden = self.gcns[0](x)
+        # x1 -> new coordinate of vertices => ex: torch.Size([8, 156, 3])
+        # x_hidden -> feature learned during gcn => ex:  torch.Size([8, 156, 192])
+        print(f"x1 GCN Block 1  -> {x1.shape}")
+        print(f"x_hidden GCN Block 1  -> {x_hidden.shape}")
 
         # before deformation 2
         x1_up = self.unpooling[0](x1)
+        print(f"x1_up before block 2 -> {x1_up.shape}")
 
+        print("START GCN BLOCK 2")
         # GCN Block 2
         x = self.projection(img_shape, img_feats, x1)
+        print(f"x projection block 2 -> {x.shape}")
         x = self.unpooling[0](torch.cat([x, x_hidden], 2))
+        print(f"x unpooling block 2 -> {x.shape}")
         # after deformation 2
         x2, x_hidden = self.gcns[1](x)
+        print(f"x2-> {x2.shape}")
+        print(f"x_hidden block 2 -> {x_hidden.shape}")
 
         # before deformation 3
         x2_up = self.unpooling[1](x2)
+        print(f"x2_up before block 3 -> {x2_up.shape}")
 
         # GCN Block 3
         x = self.projection(img_shape, img_feats, x2)
+        print(f"x projection block 3 -> {x.shape}")
         x = self.unpooling[1](torch.cat([x, x_hidden], 2))
+        print(f"x unpooling block 3 -> {x.shape}")
         x3, _ = self.gcns[2](x)
+        print(f"x3 -> {x3.shape}")
         if self.gconv_activation:
             x3 = F.relu(x3)
+
+        print(f"x3 after relu -> {x3.shape}")
+        
         # after deformation 3
         x3 = self.gconv(x3)
+        print(f"x3 after gconv -> {x3.shape}")
+        # sys.exit()
 
         if self.nn_decoder is not None:
             reconst = self.nn_decoder(img_feats)
