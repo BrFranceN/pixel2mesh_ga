@@ -1,5 +1,8 @@
 import os
+import sys
 import pickle
+
+
 
 import numpy as np
 import torch
@@ -64,3 +67,27 @@ class Ellipsoid(object):
             faces = np.loadtxt(face_file, dtype='|S32')
             self.obj_fmt_faces.append(faces)
             self.faces.append(torch.tensor(faces[:, 1:].astype(np.int) - 1))
+
+    def calculate_edge_vectors(self):
+        edge_vectors = []
+        print("Numero di vertici:", self.coord.shape[0])
+        for edges in self.edges:
+            # print("Numero di vertici:", self.coord.shape[0])
+            # print("Numero massimo di indici:", max(edges[:, 0].max(), edges[:, 1].max()))
+            # edges: [num_edges, 2]
+            start_points = self.coord[edges[:, 0]]  # Coordinate dei vertici di partenza
+            end_points = self.coord[edges[:, 1]]    # Coordinate dei vertici di arrivo
+            vectors = end_points - start_points     # Calcolo del vettore spigolo
+            edge_vectors.append(vectors)
+        return edge_vectors
+    
+    def calculate_normals(self):
+        normals = []
+        for faces in self.faces:
+            # faces: [num_faces, 3] o [num_faces, 4]
+            v1 = self.coord[faces[:, 1]] - self.coord[faces[:, 0]]
+            v2 = self.coord[faces[:, 2]] - self.coord[faces[:, 0]]
+            normal = torch.cross(v1, v2)  # Prodotto vettoriale per ottenere la normale
+            normals.append(normal)
+        return normals
+

@@ -1,13 +1,16 @@
 import argparse
 import sys
-
+import os 
 from functions.trainer import Trainer
 from options import update_options, options, reset_options
+
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Pixel2Mesh Training Entrypoint')
     parser.add_argument('--options', help='experiment options file name', required=False, type=str)
+
+    
 
     args, rest = parser.parse_known_args()
     if args.options is None:

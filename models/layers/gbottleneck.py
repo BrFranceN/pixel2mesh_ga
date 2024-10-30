@@ -46,6 +46,34 @@ class GBottleneck(nn.Module):
         return x_out, x_hidden
     
 
+# import torch
+# import torch.nn as nn
+# from algebra.cliffordalgebra import CliffordAlgebra
+
+# class CliffordAttention(nn.Module):
+#     def __init__(self, in_features, out_features, algebra):
+#         super(CliffordAttention, self).__init__()
+#         self.in_features = in_features
+#         self.out_features = out_features
+#         self.algebra = algebra
+#         self.linear = nn.Linear(in_features, out_features)
+#         self.att_weights = nn.Parameter(torch.Tensor(out_features, out_features))
+
+#     def forward(self, x):
+#         # Applica una trasformazione lineare
+#         h = self.linear(x)
+#         # Calcolo del prodotto Clifford per attenzione
+#         attention_scores = torch.einsum('ijk,kl->ijl', h, self.att_weights)
+#         attention_scores = self.algebra.geometric_product(attention_scores, attention_scores)
+#         # Applicazione dei pesi di attenzione
+#         attention = torch.softmax(attention_scores, dim=-1)
+#         output = torch.matmul(attention, h)
+#         return output
+
+
+
+    
+
 
 # # class that use geometric algebra
 # class
