@@ -15,12 +15,8 @@ from models.layers.selfattention_ga import SelfAttentionGA
 
 
 
-
 from algebra.cliffordalgebra import CliffordAlgebra
     
-
-
-
 
 
 
@@ -62,6 +58,15 @@ class P2MModel(nn.Module):
                         ellipsoid.adj_mat[2], activation=self.gconv_activation)
         ])
 
+
+
+        #TEST USATO PER AGGIUNGERE LA GEOMETRIC ALGEBRA ALLA GRAPH CONVOLUTION
+        # GBottleneck(6, self.features_dim + self.hidden_dim + 8, self.hidden_dim, self.last_hidden_dim,
+        #                 ellipsoid.adj_mat[2], activation=self.gconv_activation)
+
+        
+    
+
         self.unpooling = nn.ModuleList([
             GUnpooling(ellipsoid.unpool_idx[0]),
             GUnpooling(ellipsoid.unpool_idx[1])
@@ -76,6 +81,9 @@ class P2MModel(nn.Module):
 
         self.gconv = GConv(in_features=self.last_hidden_dim, out_features=self.coord_dim,
                            adj_mat=ellipsoid.adj_mat[2])
+        
+        self.gconv_final = GConv(in_features=11,out_features=self.coord_dim,
+                           adj_mat=ellipsoid.adj_mat[2])
 
     def forward(self, img):
         batch_size = img.size(0)
@@ -89,6 +97,8 @@ class P2MModel(nn.Module):
         x = self.projection(img_shape, img_feats, init_pts)
         x1, x_hidden = self.gcns[0](x)
 
+
+
         #HERE I OBTAIN NEW COORDINATES
         #MV ATTENTION x1
         # x1_mv = self.algebra.embed_grade(x1,1)
@@ -100,15 +110,28 @@ class P2MModel(nn.Module):
         x1_up = self.unpooling[0](x1)
         # GCN Block 2
         x = self.projection(img_shape, img_feats, x1)
+ 
         x = self.unpooling[0](torch.cat([x, x_hidden], 2))
         # after deformation 2
         x2, x_hidden = self.gcns[1](x)
+        # print(f"x_hidden shape -> {x_hidden.shape}")
+        # print(f"x2 shape -> {x2.shape}")
+
+
+ 
 
         #MV ATTENTION x2
-        # x2_mv = self.algebra.embed_grade(x2,1)
-        # x2_att = self.self_attention_ga(x2_mv) 
+
+        '''
+
+        AGGIUNTA DA VALUTARE
+        x2_mv = self.algebra.embed_grade(x2,1)
+        x2_att = self.self_attention_ga(x2_mv) 
+        '''
         # x2_att_vector = self.algebra.get_grade(x2_att,1)
         # x2 = x2_att_vector + x2 # NEW x2      
+
+
 
 
         # before deformation 3
@@ -116,28 +139,52 @@ class P2MModel(nn.Module):
 
         # GCN Block 3
         x = self.projection(img_shape, img_feats, x2)
+        # prima = torch.cat([x, x_hidden],2)
+        # dopo = torch.cat([x, x_hidden,x2_att],2)
+        # print("prima ",prima.shape)
+        # print("prima ",dopo.shape)
+        # x = self.unpooling[1](torch.cat([x, x_hidden,x2_att], 2)) # Da valutare
         x = self.unpooling[1](torch.cat([x, x_hidden], 2))
-        x3, _ = self.gcns[2](x)
+        # print("x qui -- ", x.shape)
+        # exit()
+        x3, x3_hidden_final = self.gcns[2](x)
+
+        # print("x3  -> ",x3.shape)
 
         if self.gconv_activation:
             x3 = F.relu(x3)
         
         x3 = self.gconv(x3)
+        # print("x3  -> ",x3.shape)
+
+
+
         # after deformation 3
-        # x3_mv = self.algebra.embed_grade(x3,1)
+        # x3_mv = self.algebra.embed_grade(x3,1) 
         # x3_att = self.self_attention_ga(x3_mv) 
         # x3_att_vector = self.algebra.get_grade(x3_att,1)
-        # x3 = x3_att_vector + x3 # NEW x3
+        # x3_concat =torch.cat([x3,x3_att],2) 
+        # # 
+        # ("x3 att ->", x3_att.shape)
+        # # print("x3_concat att ->", x3_concat.shape)
+        # x4 = self.gconv_final(x3_concat)
+        # print("x4 ->", x4.shape)
+
+        # sys.exit()
 
         if self.nn_decoder is not None:
             reconst = self.nn_decoder(img_feats)
         else:
             reconst = None
 
+        #AGGIUNGO UN ALTRO PEZZO FINALE
+
+
         return {
             "pred_coord": [x1, x2, x3],
             "pred_coord_before_deform": [init_pts, x1_up, x2_up],
-            "reconst": reconst
+            "reconst": reconst,
+            "final_hf":x3_hidden_final
         }
 
 

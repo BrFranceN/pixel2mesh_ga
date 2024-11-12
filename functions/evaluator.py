@@ -18,7 +18,20 @@ class Evaluator(CheckpointRunner):
 
     def __init__(self, options, logger: Logger, writer, shared_model=None):
         super().__init__(options, logger, writer, training=False, shared_model=shared_model)
+        self.my_train_data = DataLoader(self.dataset,
+                                batch_size=self.options.test.batch_size * self.options.num_gpus,
+                                num_workers=self.options.num_workers,
+                                pin_memory=self.options.pin_memory,
+                                shuffle=self.options.test.shuffle,
+                                collate_fn=self.dataset_collate_fn)
 
+
+    
+    
+    def train_data_ga(self):
+        return self.my_train_data
+
+    
     # noinspection PyAttributeOutsideInit
     def init_fn(self, shared_model=None, **kwargs):
         if self.options.model.name == "pixel2mesh":
@@ -198,3 +211,14 @@ class Evaluator(CheckpointRunner):
             # Do visualization for the first 2 images of the batch
             render_mesh = self.renderer.p2m_batch_visualize(input_batch, out_summary, self.ellipsoid.faces)
             self.summary_writer.add_image("eval_render_mesh", render_mesh, self.total_step_count)
+
+    def evaluate_step_mod(self, input_batch):
+        self.model.eval()
+
+        # Run inference
+        with torch.no_grad():
+            images = input_batch['images']
+
+            out = self.model(images)
+
+        return out

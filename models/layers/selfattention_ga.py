@@ -9,15 +9,6 @@ import torch.nn.functional as F
 
 import math
 
-
-
-
-
-
-
-
-
-
 #TODO TEST SERIO ATTENTION LAYER
 
 

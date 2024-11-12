@@ -33,13 +33,18 @@ class GConv(nn.Module):
         nn.init.xavier_uniform_(self.loop_weight.data)
 
     def forward(self, inputs):
+        # print(f"inputs in gconv: ",inputs.shape)
         support = torch.matmul(inputs, self.weight)
+        # print(f"support in gconv: ",support.shape)
         support_loop = torch.matmul(inputs, self.loop_weight)
+        # print(f"support_loop in gconv: ",support_loop.shape)
         output = dot(self.adj_mat, support, True) + support_loop
+        # print(f"output in gconv: ",output.shape)
         if self.bias is not None:
             ret = output + self.bias
         else:
             ret = output
+        # print(f"ret in gconv: ",ret.shape)
         return ret
 
     def __repr__(self):

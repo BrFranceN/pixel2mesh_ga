@@ -38,10 +38,13 @@ class GBottleneck(nn.Module):
 
     def forward(self, inputs):
         x = self.conv1(inputs)
+        # print(f"x in gconv -> {x.shape}")
         if self.activation:
             x = self.activation(x)
         x_hidden = self.blocks(x)
+        # print(f"x hidden  in gconv -> {x_hidden.shape}")
         x_out = self.conv2(x_hidden)
+        # print(f"x_out  in gconv -> {x_out.shape}")
 
         return x_out, x_hidden
     
