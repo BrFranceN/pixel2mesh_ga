@@ -270,7 +270,7 @@ class GeometricProductAttention(nn.Module):
         new_mv = self.gp_layer(x)
 
         """
-        # legacy code to project multivector into a scalre space to obtain attention scores
+        # legacy code to project multivector into a scalar space to obtain attention scores
         tensor_list = []
         i, j, k = 0, 1, 1
         mv_chunks = copy.copy(new_mv)

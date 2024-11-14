@@ -89,6 +89,7 @@ prova 2
 
 import argparse
 import sys
+import os
 import time
 from datetime import timedelta
 
@@ -96,23 +97,32 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from models.backbones import get_backbone
 from functions.evaluator import Evaluator
+from functions.base import CheckpointRunner
+
 
 
 from functions.evaluator import Evaluator
 from options import update_options, options, reset_options
 from utils.mesh import Ellipsoid
+from utils.average_meter import AverageMeter
+from utils.tensor import recursive_detach
+from utils.vis.renderer import MeshRenderer
 
 
+
+from models.p2m import P2MModel
 from models.backbones import get_backbone
 from models.layers.gbottleneck import GBottleneck
 from models.layers.gconv import GConv
 from models.layers.gpooling import GUnpooling
 from models.layers.gprojection import GProjection
 from models.layers.selfattention_ga import SelfAttentionGA
+from models.losses.p2m import P2MLoss
 from algebra.cliffordalgebra import CliffordAlgebra
 
+
+from models.layers.ga_refinement import ga_refinement
 
 
 def parse_args():
@@ -137,84 +147,255 @@ def parse_args():
     return args
 
 
-def main():
-
-    epoch_count = step_count = 0
-    args = parse_args()
-    logger, writer = reset_options(options, args, phase='eval')
-
-    evaluator = Evaluator(options, logger, writer)
-
-    # 1. get the input batch data
-
+#TODO trtansform in class paradigm
+class trainer_ga(CheckpointRunner):
     
-    # 2. analyze output 
-    # 3. apply geomtric algebra on output and train
+    def init_fn(self,shared_model=None,evaluator=None,checkpoint_file = None):
 
-    train_data_loader = evaluator.train_data_ga()
+        # self.logger = logger
+        # self.writer = writter
+        # self.options = options
+        self.evaluator = evaluator
+        self.epoch_count = self.step_count = 0
+        self.train_data_loader = evaluator.train_data_ga()
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    print(f"prova -> {options['model']}")
-    # print(options)
-
-
-    if hasattr(options, 'backbone'):
-        print(options.backbone)
-    else:
-        print("Backbone attribute is not set")
-
-
-
-    nn_encoder, nn_decoder = get_backbone(options)
-    coord_dim = options.coord_dim
-    hidden_dim = options.hidden_dim
-    last_hidden_dim = options.last_hidden_dim
-    features_dim = nn_encoder.features_dim + coord_dim
-    ellipsoid = Ellipsoid(options.dataset.mesh_pos)
+        
+        self.renderer = MeshRenderer(self.options.dataset.camera_f, self.options.dataset.camera_c,
+                                    self.options.dataset.mesh_pos)
+        self.ellipsoid = Ellipsoid(self.options.dataset.mesh_pos)
 
 
-    algebra_dim = 3
-    metric = [1 for _ in range(algebra_dim)]
-    algebra = CliffordAlgebra(metric)
-    embed_dim = 2**algebra_dim
+        if (checkpoint_file != None):
+            print(f'checkpoint absolute -> {checkpoint_file}')
+            exit()
+            self.checkpoint_file = os.path.abspath(checkpoint_file)
+        
 
-    self_attention_ga = SelfAttentionGA(algebra,embed_dim)
-    
+        
+        
+        
+        
+        
+        self.nn_encoder, self.nn_decoder = get_backbone(self.options.model)
+        self.coord_dim = self.options.model.coord_dim
+        self.hidden_dim = self.options.model.hidden_dim
+        self.last_hidden_dim = self.options.model.last_hidden_dim
+        self.features_dim = self.nn_encoder.features_dim + self.coord_dim
+
+        algebra_dim = 3
+        metric = [1 for _ in range(algebra_dim)]
+        self.algebra = CliffordAlgebra(metric)
+        self.embed_dim = 2**algebra_dim
+
+        self.self_attention_ga = SelfAttentionGA(self.algebra,self.embed_dim)
+        self.model = ga_refinement(self.hidden_dim,
+                                   self.features_dim,
+                                   self.coord_dim,
+                                   self.last_hidden_dim,
+                                   self.ellipsoid,
+                                   self.options.model.gconv_activation).to(self.device)
+        
+        if self.options.optim.name == "adam":
+            self.optimizer = torch.optim.Adam(
+                params=list(self.model.parameters()),
+                lr=self.options.optim.lr,
+                betas=(self.options.optim.adam_beta1, 0.999),
+                weight_decay=self.options.optim.wd
+            )
+        elif self.options.optim.name == "sgd":
+            self.optimizer = torch.optim.SGD(
+                params=list(self.model.parameters()),
+                lr=self.options.optim.lr,
+                momentum=self.options.optim.sgd_momentum,
+                weight_decay=self.options.optim.wd
+            )
+        else:
+            raise NotImplementedError("Your optimizer is not found")
+        self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            self.optimizer, self.options.optim.lr_step, self.options.optim.lr_factor
+        )
+
+        self.criterion = P2MLoss(self.options.loss,self.ellipsoid).to(self.device)
+        self.losses = AverageMeter()
 
 
 
+        #pretrained model
+
+        self.gpus = list(range(self.options.num_gpus))
+        
+        self.p2m_model = P2MModel(self.options.model, self.ellipsoid,
+                                self.options.dataset.camera_f, self.options.dataset.camera_c,
+                                self.options.dataset.mesh_pos)
+        
+
+        self.p2m_model = torch.nn.DataParallel(self.p2m_model, device_ids=self.gpus).cuda()
+        
+
+        #TODO Evaluators (think about if needed)
 
 
 
-    my_gconv = GBottleneck(6, features_dim + hidden_dim + 8 , hidden_dim, last_hidden_dim,
-                ellipsoid.adj_mat[2], activation=options.gconv_activation)
+    def load_checkpoint(self):
+        if self.checkpoint_file is None:
+            self.logger.info("Checkpoint file not found, skipping...")
+            return None
+        self.logger.info("Loading checkpoint file: %s" % self.checkpoint_file)
+        try:
+            return torch.load(self.checkpoint_file)
+        except UnicodeDecodeError:
+            # to be compatible with old encoding methods
+            return torch.load(self.checkpoint_file, encoding="bytes")
 
 
+    def models_dict(self):
+        return {'model': self.model}
 
-    for epoch in range(epoch_count, options.train.num_epochs):
-        epoch_count+=1
+    def optimizers_dict(self):
+        return {'optimizer': self.optimizer,
+                'lr_scheduler': self.lr_scheduler}
 
-        #TODO Reset loss
+    def train(self):
 
-        for step,batch in enumerate(train_data_loader):
-            batch = {k: v.cuda() if isinstance(v,torch.Tensor) else v for k, v in batch.items()}
+        # print(f"self.options.train.num_epochs -> {self.options.train.num_epochs}")
+        # exit()
 
-            out_pretrained = evaluator.evaluate_step_mod(batch)
-            x3 = out_pretrained['pred_coord'][2]
-            print(f"x3 shape -> {x3.shape}")
+        for epoch in range(self.epoch_count, self.options.train.num_epochs):
+            
+            self.epoch_count+=1
+            
+            self.losses.reset()
+
+
+            for step,batch in enumerate(self.train_data_loader):
+                batch = {k: v.cuda() if isinstance(v,torch.Tensor) else v for k, v in batch.items()}
+                # print(f"batch -> {batch.keys()}")
+                # print(f"batch -> {len(batch)}")
+                # exit()
+
+                out_pretrained = self.evaluator.evaluate_step_mod(batch)
+            
+
+                out = self.train_step(batch,out_pretrained)
+
+                self.step_count+=1
+
+                # Tensorboard logging every summary_steps steps
+                if self.step_count % self.options.train.summary_steps == 0:
+                    self.train_summaries(batch, *out)
+
+                # Save checkpoint every checkpoint_steps steps
+                if self.step_count % self.options.train.checkpoint_steps == 0:
+                    self.dump_checkpoint()
+            
+
+            # save checkpoint after each epoch
+            self.dump_checkpoint()
+            
+            # TODO Run validation every test_epochs (DA VALUTARE COME IMPLEMENTARE)
+            # if self.epoch_count % self.options.train.test_epochs == 0:
+            #     self.test()
+
+            # lr scheduler step
+            self.lr_scheduler.step()
+            print("after all OK")
+
+
 
             
 
+    def train_step(self,batch,out_pretrained):
+        x2 = out_pretrained['pred_coord'][1]
+        x = out_pretrained['my_var'][0]
+        x_hidden = out_pretrained['my_var'][1]
+
+        x4 = self.model(x,x2,x_hidden)
+
+        out = {
+            "pred_coord": [out_pretrained['pred_coord'][0], out_pretrained['pred_coord'][1], x4],
+            "pred_coord_before_deform": [out_pretrained['pred_coord_before_deform'][0], out_pretrained['pred_coord_before_deform'][1], out_pretrained['pred_coord_before_deform'][2]],
+            "reconst": None,}
+
+
+        #compute loss
+        loss,loss_summary = self.criterion(out,batch)
+        self.losses.update(loss.detach().cpu().item())
+
+        #backpropagation
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+
+        return recursive_detach(out), recursive_detach(loss_summary)
+    
+
+    def train_summaries(self, input_batch, out_summary, loss_summary):
+        if self.renderer is not None:
+            render_mesh = self.renderer.p2m_batch_visualize(input_batch, out_summary, self.ellipsoid.faces)
+            self.summary_writer.add_image("render_mesh", render_mesh, self.step_count)
+            self.summary_writer.add_histogram("length_distribution", input_batch["length"].cpu().numpy(),
+                                              self.step_count)
+            
+
+        # Debug info for filenames
+        self.logger.debug(input_batch["filename"])
+
+        # Save results in Tensorboard
+        for k, v in loss_summary.items():
+            self.summary_writer.add_scalar(k, v, self.step_count)
+
+        # Save results to log
+ 
+    
 
 
 
 
 
 
-     
-            for key in out_pretrained.keys():
-                print(key)
 
-            exit()
+
+
+
+def main():
+
+
+    epoch_count = step_count = 0
+    args = parse_args()
+    logger_train, writer_train = reset_options(options, args)
+    logger, writer = reset_options(options, args, phase='eval')
+    evaluator = Evaluator(options, logger, writer)
+    options.che
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+
+
+
+    #TODO 
+    # 1. get the input batch data OK 
+    # 2. analyze output OK 
+    # 3. apply geomtric algebra on output and train OK 
+    # 4. Set up loss
+ 
+
+
+    # my_trainer = trainer_ga(evaluator,options,logger_train,writer_train)
+
+    # extra_parameters = {
+    #     "evaluator": evaluator,
+    #                     }
+    my_trainer = trainer_ga(options,logger_train,writer_train,evaluator=evaluator)
+
+    my_trainer.train()
+
+    print("train OK")
+
+
+
+            
 
 
         
@@ -223,7 +404,6 @@ def main():
 
 
     # evaluator.evaluate()
-
 
 if __name__ == "__main__":
     main()

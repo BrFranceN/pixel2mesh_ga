@@ -89,7 +89,6 @@ class P2MModel(nn.Module):
         batch_size = img.size(0)
         img_feats = self.nn_encoder(img)
         img_shape = self.projection.image_feature_shape(img)
-
         init_pts = self.init_pts.data.unsqueeze(0).expand(batch_size, -1, -1)
 
 
@@ -116,10 +115,6 @@ class P2MModel(nn.Module):
         x2, x_hidden = self.gcns[1](x)
         # print(f"x_hidden shape -> {x_hidden.shape}")
         # print(f"x2 shape -> {x2.shape}")
-
-
- 
-
         #MV ATTENTION x2
 
         '''
@@ -139,11 +134,12 @@ class P2MModel(nn.Module):
 
         # GCN Block 3
         x = self.projection(img_shape, img_feats, x2)
+        x_tmp = x.clone().detach()
         # prima = torch.cat([x, x_hidden],2)
         # dopo = torch.cat([x, x_hidden,x2_att],2)
         # print("prima ",prima.shape)
         # print("prima ",dopo.shape)
-        # x = self.unpooling[1](torch.cat([x, x_hidden,x2_att], 2)) # Da valutare
+        # x = self.-[1](torch.cat([x, x_hidden,x2_att], 2)) # Da valutare
         x = self.unpooling[1](torch.cat([x, x_hidden], 2))
         # print("x qui -- ", x.shape)
         # exit()
@@ -184,7 +180,7 @@ class P2MModel(nn.Module):
             "pred_coord": [x1, x2, x3],
             "pred_coord_before_deform": [init_pts, x1_up, x2_up],
             "reconst": reconst,
-            "final_hf":x3_hidden_final
+            "my_var":[x_tmp,x_hidden]
         }
 
 

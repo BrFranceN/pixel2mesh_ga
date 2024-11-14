@@ -16,7 +16,8 @@ from functions.saver import CheckpointSaver
 
 class CheckpointRunner(object):
     def __init__(self, options, logger: Logger, summary_writer: SummaryWriter,
-                 dataset=None, training=True, shared_model=None):
+                 dataset=None, training=True, shared_model=None, evaluator=None):
+        
         self.options = options
         self.logger = logger
 
@@ -52,7 +53,7 @@ class CheckpointRunner(object):
         # in case you want to use a model that is defined in a trainer or other place in the code,
         # shared_model should help. in this case, checkpoint is not used
         self.logger.info("Running model initialization...")
-        self.init_fn(shared_model=shared_model)
+        self.init_fn(shared_model=shared_model,evaluator=evaluator)
 
         if shared_model is None:
             # checkpoint is loaded if any

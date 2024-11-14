@@ -218,7 +218,8 @@ class Evaluator(CheckpointRunner):
         # Run inference
         with torch.no_grad():
             images = input_batch['images']
-
             out = self.model(images)
-
         return out
+    
+    def get_model(self):
+        return self.model
