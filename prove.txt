@@ -6,8 +6,6 @@
 
 # visualize the prediction 
 python entrypoint_predict.py --name nonso --options experiments/default/resnet.yml --checkpoint checkpoints/resnet.pth.tar --folder datasets/examples/
-
-
 python entrypoint_predict.py --options /path/to/yml --checkpoint /path/to/checkpoint --folder /path/to/images
 
 
@@ -18,6 +16,8 @@ python entrypoint_train.py --name nonso --options experiments/default/resnet.yml
 #training new model (for fine tunning)
 python entrypoint_train_ga.py --name nonso --options experiments/default/resnet.yml --checkpoint checkpoints/resnet.pth.tar --folder datasets/examples/
 
+#new training new model (beta test)
+python entrypoint_beta.py --name nonsonew --options experiments/default/resnet.yml --checkpoint checkpoints/resnet.pth.tar 
 
 
 #test all
@@ -147,6 +147,13 @@ Test [005473] f1_2tau: 0.564412
 
 
 
+
+v.shape =>  torch.Size([8, 618, 8])
+new_mv before gp_layer torch.Size([8, 618, 8])
+new_mv after gp_layer torch.Size([8, 618, 618, 8])
+output att_prj : torch.Size([8, 618, 618, 1])
+attn_scores ->  torch.Size([8, 618, 618])
+x2_att => torch.Size([8, 618, 8])
 
 
 
@@ -848,3 +855,111 @@ Epoch 003, Step 012600/2408065, Time elapsed 1:26:32.672745, Loss 0.004780196 (0
 Epoch 003, Step 012600/2408065, Time elapsed 1:26:32.672745, Loss 0.004780196 (0.003277579)
 Epoch 003, Step 012650/2408065, Time elapsed 1:26:53.136849, Loss 0.002298327 (0.003268069)
 Epoch 003, Step 012650/2408065, Time elapsed 1:26:53.136849, Loss 0.002298327 (0.003268069)
+
+
+
+
+
+
+
+
+
+
+model n parameters: ORIGINALE + self attention (only init)
+Total Parameters: 138.926.087
+Model Size: 529.96 MB
+
+
+9 milioni di differenza aggiungendo o sottranedo la geometric algebra ... 
+
+model n parameters: ORIGINALE
+Total Parameters: 129.776.153
+Model Size: 495.06 MB
+Using GPUs: [0]
+
+
+Total Parameters: 129.776.153
+Model Size: 495.06 MB
+
+
+model n parameters: MIO 
+Total Parameters: 96.800.868
+Model Size: 369.27 MB
+
+GA REFINEMENT ->  ga_refinement(
+  (gcns): GBottleneck(
+    (blocks): Sequential(
+      (0): GResBlock(
+        (conv1): GConv (192 -> 192)
+        (conv2): GConv (192 -> 192)
+      )
+      (1): GResBlock(
+        (conv1): GConv (192 -> 192)
+        (conv2): GConv (192 -> 192)
+      )
+      (2): GResBlock(
+        (conv1): GConv (192 -> 192)
+        (conv2): GConv (192 -> 192)
+      )
+      (3): GResBlock(
+        (conv1): GConv (192 -> 192)
+        (conv2): GConv (192 -> 192)
+      )
+      (4): GResBlock(
+        (conv1): GConv (192 -> 192)
+        (conv2): GConv (192 -> 192)
+      )
+      (5): GResBlock(
+        (conv1): GConv (192 -> 192)
+        (conv2): GConv (192 -> 192)
+      )
+    )
+    (conv1): GConv (4043 -> 192)
+    (conv2): GConv (192 -> 192)
+  )
+  (gconv): GConv (192 -> 3)
+  (unpooling): GUnpooling (617 -> 2465)
+  (algebra): CliffordAlgebra()
+  (self_attention_ga): SelfAttentionGA(
+    (algebra): CliffordAlgebra()
+    (ga_attention): GeometricProductAttention(
+      (algebra): CliffordAlgebra()
+      (gp_layer): FullyConnectedSteerableGeometricProductLayer(
+        (algebra): CliffordAlgebra()
+        (normalization): NormalizationLayer(
+          (algebra): CliffordAlgebra()
+        )
+        (q_prj): MVLinear(
+          (algebra): CliffordAlgebra()
+        )
+        (k_prj): MVLinear(
+          (algebra): CliffordAlgebra()
+        )
+      )
+      (att_prj): Linear(in_features=8, out_features=1, bias=True)
+      (dropout): Dropout(p=0.5, inplace=False)
+    )
+    (v_proj): Linear(in_features=8, out_features=8, bias=True)
+  )
+)
+
+
+
+
+
+#MODEL MISMATCH DEBUG
+
+Eval missing key
+sto qua (DataParallel):
+missing key =>  _IncompatibleKeys(missing_keys=['gcns.0.blocks.0.conv1.adj_mat', 'gcns.0.blocks.0.conv2.adj_mat', 'gcns.0.blocks.1.conv1.adj_mat', 'gcns.0.blocks.1.conv2.adj_mat', 'gcns.0.blocks.2.conv1.adj_mat', 'gcns.0.blocks.2.conv2.adj_mat', 'gcns.0.blocks.3.conv1.adj_mat', 'gcns.0.blocks.3.conv2.adj_mat', 'gcns.0.blocks.4.conv1.adj_mat', 'gcns.0.blocks.4.conv2.adj_mat', 'gcns.0.blocks.5.conv1.adj_mat', 'gcns.0.blocks.5.conv2.adj_mat', 'gcns.0.conv1.adj_mat', 'gcns.0.conv2.adj_mat', 'gcns.1.blocks.0.conv1.adj_mat', 'gcns.1.blocks.0.conv2.adj_mat', 'gcns.1.blocks.1.conv1.adj_mat', 'gcns.1.blocks.1.conv2.adj_mat', 'gcns.1.blocks.2.conv1.adj_mat', 'gcns.1.blocks.2.conv2.adj_mat', 'gcns.1.blocks.3.conv1.adj_mat', 'gcns.1.blocks.3.conv2.adj_mat', 'gcns.1.blocks.4.conv1.adj_mat', 'gcns.1.blocks.4.conv2.adj_mat', 'gcns.1.blocks.5.conv1.adj_mat', 'gcns.1.blocks.5.conv2.adj_mat', 'gcns.1.conv1.adj_mat', 'gcns.1.conv2.adj_mat', 'gcns.2.blocks.0.conv1.adj_mat', 'gcns.2.blocks.0.conv2.adj_mat', 'gcns.2.blocks.1.conv1.adj_mat', 'gcns.2.blocks.1.conv2.adj_mat', 'gcns.2.blocks.2.conv1.adj_mat', 'gcns.2.blocks.2.conv2.adj_mat', 'gcns.2.blocks.3.conv1.adj_mat', 'gcns.2.blocks.3.conv2.adj_mat', 'gcns.2.blocks.4.conv1.adj_mat', 'gcns.2.blocks.4.conv2.adj_mat', 'gcns.2.blocks.5.conv1.adj_mat', 'gcns.2.blocks.5.conv2.adj_mat', 'gcns.2.conv1.adj_mat', 'gcns.2.conv2.adj_mat', 'gconv.adj_mat'], unexpected_keys=[])
+
+predict missing key
+sto qua ():
+missing key =>  _IncompatibleKeys(missing_keys=['gcns.0.blocks.0.conv1.adj_mat', 'gcns.0.blocks.0.conv2.adj_mat', 'gcns.0.blocks.1.conv1.adj_mat', 'gcns.0.blocks.1.conv2.adj_mat', 'gcns.0.blocks.2.conv1.adj_mat', 'gcns.0.blocks.2.conv2.adj_mat', 'gcns.0.blocks.3.conv1.adj_mat', 'gcns.0.blocks.3.conv2.adj_mat', 'gcns.0.blocks.4.conv1.adj_mat', 'gcns.0.blocks.4.conv2.adj_mat', 'gcns.0.blocks.5.conv1.adj_mat', 'gcns.0.blocks.5.conv2.adj_mat', 'gcns.0.conv1.adj_mat', 'gcns.0.conv2.adj_mat', 'gcns.1.blocks.0.conv1.adj_mat', 'gcns.1.blocks.0.conv2.adj_mat', 'gcns.1.blocks.1.conv1.adj_mat', 'gcns.1.blocks.1.conv2.adj_mat', 'gcns.1.blocks.2.conv1.adj_mat', 'gcns.1.blocks.2.conv2.adj_mat', 'gcns.1.blocks.3.conv1.adj_mat', 'gcns.1.blocks.3.conv2.adj_mat', 'gcns.1.blocks.4.conv1.adj_mat', 'gcns.1.blocks.4.conv2.adj_mat', 'gcns.1.blocks.5.conv1.adj_mat', 'gcns.1.blocks.5.conv2.adj_mat', 'gcns.1.conv1.adj_mat', 'gcns.1.conv2.adj_mat', 'gcns.2.blocks.0.conv1.adj_mat', 'gcns.2.blocks.0.conv2.adj_mat', 'gcns.2.blocks.1.conv1.adj_mat', 'gcns.2.blocks.1.conv2.adj_mat', 'gcns.2.blocks.2.conv1.adj_mat', 'gcns.2.blocks.2.conv2.adj_mat', 'gcns.2.blocks.3.conv1.adj_mat', 'gcns.2.blocks.3.conv2.adj_mat', 'gcns.2.blocks.4.conv1.adj_mat', 'gcns.2.blocks.4.conv2.adj_mat', 'gcns.2.blocks.5.conv1.adj_mat', 'gcns.2.blocks.5.conv2.adj_mat', 'gcns.2.conv1.adj_mat', 'gcns.2.conv2.adj_mat', 'gconv.adj_mat'], unexpected_keys=[])
+
+
+
+missing keys -> _IncompatibleKeys(missing_keys=['gcns.0.blocks.0.conv1.adj_mat', 'gcns.0.blocks.0.conv2.adj_mat', 'gcns.0.blocks.1.conv1.adj_mat', 'gcns.0.blocks.1.conv2.adj_mat', 'gcns.0.blocks.2.conv1.adj_mat', 'gcns.0.blocks.2.conv2.adj_mat', 'gcns.0.blocks.3.conv1.adj_mat', 'gcns.0.blocks.3.conv2.adj_mat', 'gcns.0.blocks.4.conv1.adj_mat', 'gcns.0.blocks.4.conv2.adj_mat', 'gcns.0.blocks.5.conv1.adj_mat', 'gcns.0.blocks.5.conv2.adj_mat', 'gcns.0.conv1.adj_mat', 'gcns.0.conv2.adj_mat', 'gcns.1.blocks.0.conv1.adj_mat', 'gcns.1.blocks.0.conv2.adj_mat', 'gcns.1.blocks.1.conv1.adj_mat', 'gcns.1.blocks.1.conv2.adj_mat', 'gcns.1.blocks.2.conv1.adj_mat', 'gcns.1.blocks.2.conv2.adj_mat', 'gcns.1.blocks.3.conv1.adj_mat', 'gcns.1.blocks.3.conv2.adj_mat', 'gcns.1.blocks.4.conv1.adj_mat', 'gcns.1.blocks.4.conv2.adj_mat', 'gcns.1.blocks.5.conv1.adj_mat', 'gcns.1.blocks.5.conv2.adj_mat', 'gcns.1.conv1.adj_mat', 'gcns.1.conv2.adj_mat', 'gcns.2.blocks.0.conv1.adj_mat', 'gcns.2.blocks.0.conv2.adj_mat', 'gcns.2.blocks.1.conv1.adj_mat', 'gcns.2.blocks.1.conv2.adj_mat', 'gcns.2.blocks.2.conv1.adj_mat', 'gcns.2.blocks.2.conv2.adj_mat', 'gcns.2.blocks.3.conv1.adj_mat', 'gcns.2.blocks.3.conv2.adj_mat', 'gcns.2.blocks.4.conv1.adj_mat', 'gcns.2.blocks.4.conv2.adj_mat', 'gcns.2.blocks.5.conv1.adj_mat', 'gcns.2.blocks.5.conv2.adj_mat', 'gcns.2.conv1.adj_mat', 'gcns.2.conv2.adj_mat', 'gconv.adj_mat'], unexpected_keys=[])
+
+
+

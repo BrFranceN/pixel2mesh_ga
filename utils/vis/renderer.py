@@ -3,7 +3,9 @@ import neural_renderer as nr
 import numpy as np
 import torch
 
-np.float = np.float64
+np.float = np.float32
+
+
 def _process_render_result(img, height, width):
     if isinstance(img, torch.Tensor):
         img = img.cpu().numpy()

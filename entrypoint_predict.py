@@ -35,5 +35,10 @@ def main():
     predictor.predict()
 
 
+#TODO 
+def call_inference(args):
+    pass
+
+
 if __name__ == "__main__":
     main()

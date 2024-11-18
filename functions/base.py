@@ -16,7 +16,7 @@ from functions.saver import CheckpointSaver
 
 class CheckpointRunner(object):
     def __init__(self, options, logger: Logger, summary_writer: SummaryWriter,
-                 dataset=None, training=True, shared_model=None, evaluator=None):
+                 dataset=None, training=True, shared_model=None, evaluator=None,ckp_file=None, old_style=True):
         
         self.options = options
         self.logger = logger
@@ -51,11 +51,11 @@ class CheckpointRunner(object):
 
         # override this function to define your model, optimizers etc.
         # in case you want to use a model that is defined in a trainer or other place in the code,
-        # shared_model should help. in this case, checkpoint is not used
+        # shared_model should help. in this case, checkpoint is not used=
         self.logger.info("Running model initialization...")
-        self.init_fn(shared_model=shared_model,evaluator=evaluator)
+        self.init_fn(shared_model=shared_model,ckp_file = ckp_file)
 
-        if shared_model is None:
+        if shared_model is None and old_style:
             # checkpoint is loaded if any
             self.saver = CheckpointSaver(self.logger, checkpoint_dir=str(self.options.checkpoint_dir),
                                          checkpoint_file=self.options.checkpoint)
@@ -95,14 +95,23 @@ class CheckpointRunner(object):
             self.logger.info("Checkpoint not loaded")
             return
         for model_name, model in self.models_dict().items():
+            #TODO REMOVE the mods
+            # print("model_name =>", model_name)
             if model_name in checkpoint:
                 if isinstance(model, torch.nn.DataParallel):
+                    # print('sto qua (DataParallel):')
+                    # missing = model.module.load_state_dict(checkpoint[model_name], strict=False)
+                    # print("missing key => ",missing)
                     model.module.load_state_dict(checkpoint[model_name], strict=False)
                 else:
+                    # print('sto qua ():')
+                    # missing2 = model.load_state_dict(checkpoint[model_name], strict=False)
+                    # print("missing key => ",missing2)
                     model.load_state_dict(checkpoint[model_name], strict=False)
         if self.optimizers_dict() is not None:
             for optimizer_name, optimizer in self.optimizers_dict().items():
                 if optimizer_name in checkpoint:
+                    print("OPTIMIZER NAME : ",optimizer_name )
                     optimizer.load_state_dict(checkpoint[optimizer_name])
         else:
             self.logger.warning("Optimizers not found in the runner, skipping...")

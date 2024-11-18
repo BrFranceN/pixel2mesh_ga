@@ -1,8 +1,5 @@
 
 
-
-
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -47,6 +44,9 @@ class ga_refinement(nn.Module):
     def forward(self,x,x2,x_hidden):
         x2_mv = self.algebra.embed_grade(x2,1)
         x2_att = self.self_attention_ga(x2_mv) 
+        # print(f"x2_att => {x2_att.shape}")
+        
+
         x_new = self.unpooling(torch.cat([x, x_hidden,x2_att], 2))
         x4,x4_hidden_final = self.gcns(x_new)
 

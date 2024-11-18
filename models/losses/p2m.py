@@ -5,6 +5,8 @@ import torch.nn.functional as F
 from models.layers.chamfer_wrapper import ChamferDist
 
 
+
+# cosi posso chiamare P2MLoss con forward
 class P2MLoss(nn.Module):
     def __init__(self, options, ellipsoid):
         super().__init__()
@@ -93,6 +95,8 @@ class P2MLoss(nn.Module):
             image_loss = self.image_loss(gt_images, outputs["reconst"])
 
         for i in range(3):
+            # print("gt_coord type:",gt_coord.dtype )
+            # print("pred_coord[i]:",pred_coord[i].dtype )
             dist1, dist2, idx1, idx2 = self.chamfer_dist(gt_coord, pred_coord[i])
             chamfer_loss += self.options.weights.chamfer[i] * (torch.mean(dist1) +
                                                                self.options.weights.chamfer_opposite * torch.mean(dist2))
@@ -102,6 +106,7 @@ class P2MLoss(nn.Module):
                                                                    pred_coord[i], i)
             lap_loss += lap_const[i] * lap
             move_loss += lap_const[i] * move
+
 
         loss = chamfer_loss + image_loss * self.options.weights.reconst + \
                self.options.weights.laplace * lap_loss + \

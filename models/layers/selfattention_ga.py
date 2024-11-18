@@ -1,4 +1,5 @@
-
+import sys 
+sys.path.append('clifford-group-equivariant-neural-networks')
 
 from algebra.cliffordalgebra import CliffordAlgebra
 
@@ -9,11 +10,10 @@ import torch.nn.functional as F
 
 import math
 
-#TODO TEST SERIO ATTENTION LAYER
 
 
 #@title Multivector linear layer
-
+'''
 class MVLinear(nn.Module):
     """
     Multivector linear layer: add weights and biases to the elements of a multivector.
@@ -85,6 +85,70 @@ class MVLinear(nn.Module):
         bias = self.algebra.embed(self.bias, self.b_dims)
         # print(f"bias shape -> {bias.shape}")
         result = result + bias
+        return result     
+'''
+
+class MVLinear(nn.Module):
+
+    def __init__(
+        self, 
+        algebra, 
+        in_features, 
+        out_features, 
+        subspaces=True, 
+        bias=True
+    ):
+        super().__init__()
+        self.algebra = algebra
+        self.in_features = in_features
+        self.out_features = out_features
+        self.subspaces = subspaces
+        # self.subspace_dims = algebra.subspaces.tolist()  
+
+        if subspaces:
+            self.weight = nn.Parameter(
+                torch.empty(out_features, in_features, algebra.n_subspaces)
+                )
+            self._forward = self._forward_subspaces
+        else:
+            self.weight = nn.Parameter(torch.empty(out_features, in_features))
+
+        if bias:
+            self.bias = nn.Parameter(torch.empty(1, out_features, 1))
+            self.b_dims = (0,)
+        else:
+            self.register_parameter('bias', None)
+            self.b_dims = ()
+
+        self.reset_parameters()
+
+
+    def reset_parameters(self):
+        torch.nn.init.normal_(self.weight, std=1 / math.sqrt(self.in_features))
+
+        if self.bias is not None:
+            torch.nn.init.zeros_(self.bias)
+
+    def _forward(self, input):
+        return torch.einsum("bm...i, nm->bn...i", input, self.weight)
+
+    def _forward_subspaces(self, input):
+        weight = self.weight.repeat_interleave(self.algebra.subspaces, dim=-1)
+        # print("--------")
+        # print(f"4 input: {input.shape}")
+        # print(f"self weight: {self.weight.shape}")
+        # print(f"weight: {weight.shape}")
+        output = torch.einsum("bm...i, nmi->bn...i", input, weight)
+        # print(f"output: {output.shape}")
+        return output
+
+
+    def forward(self, input):
+        result = self._forward(input)
+
+        if self.bias is not None:
+            bias = self.algebra.embed(self.bias, self.b_dims)
+            result += unsqueeze_like(bias, result, dim=2)
         return result
 
 @torch.jit.script
@@ -172,11 +236,13 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
         """
         super().__init__()
         self.algebra = algebra
-        self.features = features
+        self.features = features # prima c'era features
+
 
         self.normalization = NormalizationLayer(algebra, features)
-        self.q_prj = MVLinear(algebra, features, features)
-        self.k_prj = MVLinear(algebra, features, features)
+        #TODO MODIFY 618 -> NUMBER OF VECTOR
+        self.q_prj = MVLinear(algebra, 618, 618)
+        self.k_prj = MVLinear(algebra, 618, 618)
 
     # @torch.jit.script
     def forward(self, input):
@@ -185,6 +251,10 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
         # mv projection
         q = self.q_prj(input)
         k = self.k_prj(input)
+
+        # print("input shape:", input.shape)
+        # print("q shape : ",q.shape)
+        # print("k shape : ",k.shape)
 
         # mv normalization
         q = self.normalization(q)
@@ -209,6 +279,7 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
         # of the script to run in mixed precision
         with torch.amp.autocast('cuda'):
             output = fast_einsum(q_einsum, cayley, k_einsum)
+            
 
         """
         # comment the previous 2 line and uncomment this to monitor time on gpu
@@ -234,7 +305,7 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
                 for n in range(input.shape[1]):
                     output[b,m,n, :] += torch.einsum("...i,ijk,...k->...j", q[b,m,:], cayley, k[b,n,:])
         """
-
+        # print(f"output -> {output.shape}")
         return output
 
 
@@ -267,7 +338,10 @@ class GeometricProductAttention(nn.Module):
     def forward(self, x):
         # compute pairwise geometric products using the geometric product layer
         # start = time.time()
+        # print('new_mv before gp_layer', x.shape)
         new_mv = self.gp_layer(x)
+        # print('new_mv after gp_layer', new_mv.shape)
+        # return new_mv
 
         """
         # legacy code to project multivector into a scalar space to obtain attention scores
@@ -291,6 +365,8 @@ class GeometricProductAttention(nn.Module):
 
         # apply attention score projection
         output = self.att_prj(new_mv.float())
+        # print("output att_prj :",output.shape)
+        
 
         # end = time.time()
         # print(f"attention score computation in {end - start:.4f} seconds") # attention operation time
@@ -304,14 +380,20 @@ class SelfAttentionGA(nn.Module):
 
         self.algebra = algebra
         self.ga_attention = GeometricProductAttention(algebra, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)# Before
+        # self.v_proj = MVLinear(algebra,618, embed_dim) 
 
     def forward(self, x, attention_mask=None):
         batch_size, seq_length, embed_dim = x.size()
-        v = self.v_proj(x)
+        v = self.v_proj(x) # before [8,618,8] (without projection: [8,8,8])
 
+        # print("v.shape => ",v.shape)
+
+        # print(" v shape ", v.shape)
         # compute attention scores using geometric product
         attn_scores = self.ga_attention(x).squeeze(-1)
+
+        # print("attn_scores -> ",attn_scores.shape)
 
         if attention_mask is not None:
             attention_mask = attention_mask.unsqueeze(1)
@@ -319,6 +401,9 @@ class SelfAttentionGA(nn.Module):
             attn_scores = attn_scores.masked_fill(attention_mask == 0, float('-inf'))
 
         attn_probs = torch.softmax(attn_scores, dim=-1)
+
+    
+        
 
         # apply attention to values tensor
         return torch.einsum("bqk,bvd->bqd", attn_probs, v)

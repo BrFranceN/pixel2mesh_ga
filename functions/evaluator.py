@@ -14,6 +14,7 @@ from utils.mesh import Ellipsoid
 from utils.vis.renderer import MeshRenderer
 
 
+
 class Evaluator(CheckpointRunner):
 
     def __init__(self, options, logger: Logger, writer, shared_model=None):

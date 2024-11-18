@@ -36,6 +36,9 @@ class Predictor(CheckpointRunner):
             self.model = P2MModel(self.options.model, self.ellipsoid,
                                   self.options.dataset.camera_f, self.options.dataset.camera_c,
                                   self.options.dataset.mesh_pos)
+            
+            
+
             if self.gpu_inference:
                 self.model.cuda()
                 # create renderer

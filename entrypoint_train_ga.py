@@ -96,9 +96,11 @@ from datetime import timedelta
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import default_collate
 
 from functions.evaluator import Evaluator
 from functions.base import CheckpointRunner
+from functions.saver import CheckpointSaver
 
 
 
@@ -123,6 +125,7 @@ from algebra.cliffordalgebra import CliffordAlgebra
 
 
 from models.layers.ga_refinement import ga_refinement
+
 
 
 def parse_args():
@@ -150,14 +153,20 @@ def parse_args():
 #TODO trtansform in class paradigm
 class trainer_ga(CheckpointRunner):
     
-    def init_fn(self,shared_model=None,evaluator=None,checkpoint_file = None):
+    def init_fn(self,shared_model=None,ckp_file=None):
 
         # self.logger = logger
         # self.writer = writter
         # self.options = options
-        self.evaluator = evaluator
+        # self.evaluator = evaluator
+
+
+        self.saver = CheckpointSaver(self.logger, checkpoint_dir=str(self.options.checkpoint_dir),
+                                         checkpoint_file=self.options.checkpoint)
+        
+
         self.epoch_count = self.step_count = 0
-        self.train_data_loader = evaluator.train_data_ga()
+        # self.train_data_loader = evaluator.train_data_ga() # old way to inizialite dataset
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         
@@ -166,15 +175,10 @@ class trainer_ga(CheckpointRunner):
         self.ellipsoid = Ellipsoid(self.options.dataset.mesh_pos)
 
 
-        if (checkpoint_file != None):
-            print(f'checkpoint absolute -> {checkpoint_file}')
-            exit()
-            self.checkpoint_file = os.path.abspath(checkpoint_file)
-        
 
-        
-        
-        
+
+        if (ckp_file != None):
+            self.ckpt_file = os.path.abspath(ckp_file)
         
         
         self.nn_encoder, self.nn_decoder = get_backbone(self.options.model)
@@ -195,6 +199,18 @@ class trainer_ga(CheckpointRunner):
                                    self.last_hidden_dim,
                                    self.ellipsoid,
                                    self.options.model.gconv_activation).to(self.device)
+        
+
+        print("model n parameters:")
+        print("GA REFINEMENT -> ", self.model)
+        # parametr estimation
+        total_params = sum(p.numel() for p in self.model.parameters())
+        param_size_bytes = total_params * 4  # Assuming float32
+        model_size_mb = param_size_bytes / (1024 ** 2)
+        print(f"Total Parameters: {total_params}")
+        print(f"Model Size: {model_size_mb:.2f} MB")
+        
+
         
         if self.options.optim.name == "adam":
             self.optimizer = torch.optim.Adam(
@@ -231,22 +247,35 @@ class trainer_ga(CheckpointRunner):
         
 
         self.p2m_model = torch.nn.DataParallel(self.p2m_model, device_ids=self.gpus).cuda()
+
+        ckpt = self.load_checkpoint_2()
+        missing_keys = self.p2m_model.module.load_state_dict(ckpt, strict=False)
+        print("MISSING KEYS : ", missing_keys)
+
+
+        print("model n parameters:")
+        # parametr estimation
+        total_params = sum(p.numel() for p in self.model.parameters())
+        param_size_bytes = total_params * 4  # Assuming float32
+        model_size_mb = param_size_bytes / (1024 ** 2)
+        print(f"Total Parameters: {total_params}")
+        print(f"Model Size: {model_size_mb:.2f} MB")
         
 
         #TODO Evaluators (think about if needed)
 
 
 
-    def load_checkpoint(self):
-        if self.checkpoint_file is None:
+    def load_checkpoint_2(self):
+        if self.ckpt_file is None:
             self.logger.info("Checkpoint file not found, skipping...")
             return None
-        self.logger.info("Loading checkpoint file: %s" % self.checkpoint_file)
+        self.logger.info("Loading checkpoint file (TRAINING_GA): %s" % self.ckpt_file)
         try:
-            return torch.load(self.checkpoint_file)
+            return torch.load(self.ckpt_file)
         except UnicodeDecodeError:
             # to be compatible with old encoding methods
-            return torch.load(self.checkpoint_file, encoding="bytes")
+            return torch.load(self.ckpt_file, encoding="bytes")
 
 
     def models_dict(self):
@@ -264,17 +293,31 @@ class trainer_ga(CheckpointRunner):
         for epoch in range(self.epoch_count, self.options.train.num_epochs):
             
             self.epoch_count+=1
-            
+
             self.losses.reset()
 
 
-            for step,batch in enumerate(self.train_data_loader):
+            # Create a new data loader for every epoch
+            train_data_loader = DataLoader(self.dataset,
+                                        batch_size=self.options.train.batch_size * self.options.num_gpus,
+                                        num_workers=self.options.num_workers,
+                                        pin_memory=self.options.pin_memory,
+                                        shuffle=self.options.train.shuffle,
+                                        collate_fn=self.dataset_collate_fn)
+
+
+            for step,batch in enumerate(train_data_loader):
                 batch = {k: v.cuda() if isinstance(v,torch.Tensor) else v for k, v in batch.items()}
                 # print(f"batch -> {batch.keys()}")
                 # print(f"batch -> {len(batch)}")
                 # exit()
 
-                out_pretrained = self.evaluator.evaluate_step_mod(batch)
+                
+             
+
+                # print("step :",step)
+                # out_pretrained = self.evaluator.evaluate_step_mod(batch)
+                out_pretrained = self.pretrained_step(batch)
             
 
                 out = self.train_step(batch,out_pretrained)
@@ -283,11 +326,13 @@ class trainer_ga(CheckpointRunner):
 
                 # Tensorboard logging every summary_steps steps
                 if self.step_count % self.options.train.summary_steps == 0:
+                    print("entro?")
                     self.train_summaries(batch, *out)
 
                 # Save checkpoint every checkpoint_steps steps
                 if self.step_count % self.options.train.checkpoint_steps == 0:
-                    self.dump_checkpoint()
+                    print("entro dump?")
+                    self.dump_checkpoint() #da cambiare non penso funzioni
             
 
             # save checkpoint after each epoch
@@ -299,11 +344,17 @@ class trainer_ga(CheckpointRunner):
 
             # lr scheduler step
             self.lr_scheduler.step()
-            print("after all OK")
 
 
 
-            
+    def pretrained_step(self, input_batch):
+        self.p2m_model.eval()
+
+        # Run inference
+        with torch.no_grad():
+            images = input_batch['images']
+            out = self.p2m_model(images)
+        return out
 
     def train_step(self,batch,out_pretrained):
         x2 = out_pretrained['pred_coord'][1]
@@ -311,6 +362,8 @@ class trainer_ga(CheckpointRunner):
         x_hidden = out_pretrained['my_var'][1]
 
         x4 = self.model(x,x2,x_hidden)
+
+
 
         out = {
             "pred_coord": [out_pretrained['pred_coord'][0], out_pretrained['pred_coord'][1], x4],
@@ -346,7 +399,13 @@ class trainer_ga(CheckpointRunner):
         for k, v in loss_summary.items():
             self.summary_writer.add_scalar(k, v, self.step_count)
 
+
         # Save results to log
+        self.logger.info("Epoch %03d, Step %06d/%06d, Time elapsed %s, Loss %.9f (%.9f)" % (
+            self.epoch_count, self.step_count,
+            self.options.train.num_epochs * len(self.dataset) // (
+                        self.options.train.batch_size * self.options.num_gpus),
+            self.time_elapsed, self.losses.val, self.losses.avg))
  
     
 
@@ -364,21 +423,31 @@ def main():
 
     epoch_count = step_count = 0
     args = parse_args()
-    logger_train, writer_train = reset_options(options, args)
-    logger, writer = reset_options(options, args, phase='eval')
-    evaluator = Evaluator(options, logger, writer)
-    options.che
+    logger, writer = reset_options(options, args)
+    # logger, writer = reset_options(options, args, phase='eval')
+    # evaluator = Evaluator(options, logger, writer)
+    print(f"CHECKPOINTS -> {options.checkpoint}")
+    print(f"DATASET -> {options.dataset}")
+    print(f"DATASET name -> {options.dataset.name}")
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    my_trainer = trainer_ga(options,logger,writer,ckp_file=options.checkpoint,old_style=False)
+
+    my_trainer.train()
+
+    print("train OK")
 
 
 
 
-    #TODO 
+
+    #TODO
     # 1. get the input batch data OK 
     # 2. analyze output OK 
     # 3. apply geomtric algebra on output and train OK 
-    # 4. Set up loss
+    # 4. Set up loss 
+    # 5. eliminate the superfluos
  
 
 
@@ -387,11 +456,12 @@ def main():
     # extra_parameters = {
     #     "evaluator": evaluator,
     #                     }
-    my_trainer = trainer_ga(options,logger_train,writer_train,evaluator=evaluator)
 
-    my_trainer.train()
 
-    print("train OK")
+    # my_trainer = trainer_ga(options,logger_train,writer_train,evaluator=evaluator,checkpoint_file=options.checkpoint)
+    # my_trainer = trainer_ga(options,logger_train,writer_train,checkpoint_file=options.checkpoint)
+
+
 
 
 

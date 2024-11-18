@@ -44,6 +44,15 @@ class Trainer(CheckpointRunner):
                 raise NotImplementedError("Your model is not found")
             self.model = torch.nn.DataParallel(self.model, device_ids=self.gpus).cuda()
 
+
+        print("model n parameters: ORIGINALE")
+        # parametr estimation
+        total_params = sum(p.numel() for p in self.model.parameters())
+        param_size_bytes = total_params * 4  # Assuming float32
+        model_size_mb = param_size_bytes / (1024 ** 2)
+        print(f"Total Parameters: {total_params}")
+        print(f"Model Size: {model_size_mb:.2f} MB")
+
         # Setup a joint optimizer for the 2 models
         if self.options.optim.name == "adam":
             self.optimizer = torch.optim.Adam(
