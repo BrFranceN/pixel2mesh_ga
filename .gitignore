@@ -117,8 +117,10 @@ logs/
 datasets/data
 datasets/extras
 datasets/examples/*.obj
+datasets/originalExamples
 summary
 checkpoints
+checkpoints_ga
 
 # IDEA
 .idea

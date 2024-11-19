@@ -26,6 +26,11 @@ options.checkpoint_dir = "checkpoints"
 options.checkpoint = None
 
 
+
+#GA parameters 
+options.checkpoint_dir_ga = 'checkpoints_ga'
+options.checkpoint_ga = None
+
 #dataset parameters
 options.dataset = edict()
 options.dataset.name = "shapenet"
@@ -85,6 +90,7 @@ options.train.use_augmentation = True
 options.train.shuffle = True
 
 
+
 #test parameters
 options.test = edict()
 options.test.dataset = []
@@ -103,6 +109,9 @@ options.optim.lr = 5.0E-5
 options.optim.wd = 1.0E-6
 options.optim.lr_step = [30, 45]
 options.optim.lr_factor = 0.1
+
+
+
 
 
 
@@ -175,6 +184,11 @@ def reset_options(options, args, phase='train'):
         options.num_gpus = args.gpus
     if hasattr(args, "shuffle") and args.shuffle:
         options.train.shuffle = options.test.shuffle = True
+    
+    #attributes for GA 
+    if hasattr(args, "checkpoint_ga") and args.checkpoint_ga:
+        options.checkpoint_ga = args.checkpoint_ga
+
 
     options.name = args.name
 

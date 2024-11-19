@@ -61,7 +61,7 @@ optim:
 pin_memory: true
 summary_dir: summary
 test:
-  batch_size: 24
+  batch_size: 8
   dataset: []
   shuffle: true
   summary_steps: 5

@@ -19,18 +19,20 @@ class Evaluator(CheckpointRunner):
 
     def __init__(self, options, logger: Logger, writer, shared_model=None):
         super().__init__(options, logger, writer, training=False, shared_model=shared_model)
-        self.my_train_data = DataLoader(self.dataset,
-                                batch_size=self.options.test.batch_size * self.options.num_gpus,
-                                num_workers=self.options.num_workers,
-                                pin_memory=self.options.pin_memory,
-                                shuffle=self.options.test.shuffle,
-                                collate_fn=self.dataset_collate_fn)
+
+        # TODO REMOVE MY ADDING
+        # self.my_train_data = DataLoader(self.dataset,
+        #                         batch_size=self.options.test.batch_size * self.options.num_gpus,
+        #                         num_workers=self.options.num_workers,
+        #                         pin_memory=self.options.pin_memory,
+        #                         shuffle=self.options.test.shuffle,
+        #                         collate_fn=self.dataset_collate_fn)
 
 
     
-    
-    def train_data_ga(self):
-        return self.my_train_data
+    #MY ADDING
+    # def train_data_ga(self):
+    #     return self.my_train_data
 
     
     # noinspection PyAttributeOutsideInit

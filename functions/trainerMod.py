@@ -5,7 +5,7 @@ from datetime import timedelta
 import gc
 
 import torch
-from utils.tensor import recursive_detach
+from torch.profiler import profile, record_function, ProfilerActivity #ANALISI PERFORMANCE
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
@@ -21,6 +21,7 @@ from algebra.cliffordalgebra import CliffordAlgebra
 
 from utils.average_meter import AverageMeter
 from utils.mesh import Ellipsoid
+from utils.tensor import recursive_detach
 from utils.vis.renderer import MeshRenderer
 
 
@@ -43,6 +44,10 @@ class TrainerGA():
         self.training = training
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.min_loss = torch.tensor(float('inf'))
+        
+
+        #prova da cancellare immediatamente:
+        self.training=False
         
         
 
@@ -232,28 +237,34 @@ class TrainerGA():
 
 
     def train_step(self,batch,out_pretrained):
-        x2 = out_pretrained['pred_coord'][1]
-        x = out_pretrained['my_var'][0]
-        x_hidden = out_pretrained['my_var'][1]
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            x2 = out_pretrained['pred_coord'][1]
+            x = out_pretrained['my_var'][0]
+            x_hidden = out_pretrained['my_var'][1]
 
-        x4 = self.model(x,x2,x_hidden)
-
-
-
-        out = {
-            "pred_coord": [out_pretrained['pred_coord'][0], out_pretrained['pred_coord'][1], x4],
-            "pred_coord_before_deform": [out_pretrained['pred_coord_before_deform'][0], out_pretrained['pred_coord_before_deform'][1], out_pretrained['pred_coord_before_deform'][2]],
-            "reconst": out_pretrained['reconst']}
+            x4 = self.model(x,x2,x_hidden)
 
 
-        #compute loss
-        loss,loss_summary = self.criterion(out,batch)
-        self.losses.update(loss.detach().cpu().item())
 
-        #backpropagation
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+            out = {
+                "pred_coord": [out_pretrained['pred_coord'][0], out_pretrained['pred_coord'][1], x4],
+                "pred_coord_before_deform": [out_pretrained['pred_coord_before_deform'][0], out_pretrained['pred_coord_before_deform'][1], out_pretrained['pred_coord_before_deform'][2]],
+                "reconst": out_pretrained['reconst']}
+
+
+            #compute loss
+            loss,loss_summary = self.criterion(out,batch)
+            self.losses.update(loss.detach().cpu().item())
+
+            #backpropagation
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+        #RESULT ON PERFORMANCE 
+        if self.step_count % 50 == 0:
+            print("risultati performance di un train step: ", end='')
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
 
         return recursive_detach(out), recursive_detach(loss_summary)
@@ -264,8 +275,13 @@ class TrainerGA():
 
         #run inference
         with torch.no_grad():
-            images = input_batch['images']
-            out = self.p2m(images)
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as pre_prof:
+                images = input_batch['images']
+                out = self.p2m(images)
+
+        if self.step_count % 50 == 0:
+            print("Risultati sul pretrained step: ", end='')
+            print(pre_prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
         return out
     
 
