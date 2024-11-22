@@ -12,82 +12,6 @@ import math
 
 
 
-#@title Multivector linear layer
-'''
-class MVLinear(nn.Module):
-    """
-    Multivector linear layer: add weights and biases to the elements of a multivector.
-    """
-
-    def __init__(self, algebra, in_features, out_features):
-        super().__init__()
-
-        self.algebra = algebra
-        self.in_features = in_features
-        self.out_features = out_features
-        max_val = 600
-
-        self.weight = nn.Parameter(
-            torch.empty(self.out_features, self.in_features)
-        )
-        self.bias = nn.Parameter(torch.empty(1, 1, 1))
-        self.b_dims = (0,)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        torch.nn.init.normal_(self.weight, std=1 / math.sqrt(self.in_features))
-
-        if self.bias is not None:
-            torch.nn.init.zeros_(self.bias)
-
-    def forward(self, input):
-        # element-wise multiplication
-        # start = time.time()
-        weight = self.weight
-
-        result = torch.matmul(input, weight)
-        # print(f" input.shape X  weight.shape  ->  {input.shape}X {weight.shape}  ")
-        # result = torch.einsum('ijk,kl->ijl', input, weight) # slower alternative
-        # end = time.time()
-        # print(f"operation took {end - start:.4f} seconds") # single operation time
-
-        """
-        # Legacy code used to replace the ensum/matmul but it is slower (do not parallelize)
-        start = time.time()
-        for b in range(input.shape[0]): # batch size (b)
-            for m in range(weight.shape[1]): # embed_dim  (d)
-                for i in range(input.shape[-1]): # embed_dim (d)
-                    for n in range(weight.shape[0]): # seq len (s)
-                        custom[b,m,i] += input[b,m,i] * weight[n,m]
-
-                        #       b m i           n m
-                        # input[0,0,0] * weight[0,0]
-                        # input[0,1,0] * weight[1,0]
-                        #             ...
-                        # input[0,s,0] * weight[s,0]
-
-                        # input[0,0,1] * weight[0,1]
-                        # input[0,1,1] * weight[1,1]
-                        #             ...
-                        # input[0,s,1] * weight[s,1]
-
-                        # input[0,0,d] * weight[0,d]
-                        # input[0,1,d] * weight[1,d]
-                        #             ...
-                        # input[0,s,d] * weight[s,d]
-
-                        # input[1,0,0] * weight[0,0]
-        end = time.time()
-        print(f"for loop took {end - start:.4f} seconds") # single operation time
-        """
-
-        # print(f"result shape -> {result.shape}")
-        bias = self.algebra.embed(self.bias, self.b_dims)
-        # print(f"bias shape -> {bias.shape}")
-        result = result + bias
-        return result     
-'''
-
 class MVLinear(nn.Module):
 
     def __init__(
@@ -311,7 +235,7 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
 
 
 class GeometricProductAttention(nn.Module):
-    def __init__(self, algebra, embed_dim):
+    def __init__(self, algebra, embed_dim,hidden_dim):
         """
         Self-Attention layer using geometric algebra operation.
 
@@ -320,6 +244,8 @@ class GeometricProductAttention(nn.Module):
             features: The number of features for the geometric product layer
         """
         super(GeometricProductAttention, self).__init__()
+
+        
 
         self.algebra = algebra
         self.subspaces_dims = algebra.subspaces
@@ -332,7 +258,15 @@ class GeometricProductAttention(nn.Module):
         # self.att_prj = nn.Linear(algebra.dim, 1)
 
         # single projection layer to learn common propertires
-        self.att_prj = nn.Linear(embed_dim, 1)
+        # self.att_prj = nn.Linear(embed_dim, 1)
+        ##feed forward
+        self.att_prj = nn.Sequential(
+            nn.Linear(embed_dim,hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim,hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim,1)
+        )
         self.dropout = nn.Dropout(p=0.5)
 
     def forward(self, x):
@@ -375,11 +309,11 @@ class GeometricProductAttention(nn.Module):
 
 
 class SelfAttentionGA(nn.Module):
-    def __init__(self, algebra, embed_dim):
+    def __init__(self, algebra, embed_dim,hidden_dim):
         super(SelfAttentionGA, self).__init__()
 
         self.algebra = algebra
-        self.ga_attention = GeometricProductAttention(algebra, embed_dim)
+        self.ga_attention = GeometricProductAttention(algebra, embed_dim,hidden_dim)
         self.v_proj = nn.Linear(embed_dim, embed_dim)# Before
         # self.v_proj = MVLinear(algebra,618, embed_dim) 
 
@@ -407,3 +341,72 @@ class SelfAttentionGA(nn.Module):
 
         # apply attention to values tensor
         return torch.einsum("bqk,bvd->bqd", attn_probs, v)
+
+
+
+class TransformerEncoderLayerGA(nn.Module):
+    def __init__(self, algebra, embed_dim, hidden_dim):
+        super(TransformerEncoderLayerGA, self).__init__()
+
+        self.self_attn = SelfAttentionGA(algebra, embed_dim,hidden_dim)
+        # feed forward network
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.fc_in = nn.Linear(embed_dim, hidden_dim)
+        self.activation = nn.GELU()
+        self.fc_out = nn.Linear(hidden_dim, embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+
+    def forward(self, x, attention_mask=None):
+        attn_out = self.self_attn(self.norm1(x), attention_mask)
+        x = x + attn_out
+
+        # feed-forward
+        ff_out = self.fc_in(x)
+        ff_out = self.activation(ff_out)
+        ff_out = self.fc_out(ff_out)
+
+        # residual and normalization
+        x = x + ff_out
+        x = self.norm2(x)
+        # we are here yheeee!!!
+        return x
+
+
+class PositionalEncoding(torch.nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+
+        # create a long enough position tensor
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, d_model)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term[:pe[:, 1::2].shape[1]])
+        self.register_buffer('pe', pe.unsqueeze(0))
+
+    def forward(self, x):
+        # return x + self.pe[:, :x.size(1)] #TODO da rivedere 
+        return x 
+
+
+class TransformerEncoderGA(nn.Module):
+    def __init__(self, algebra, embed_dim, hidden_dim, num_layers):
+        super(TransformerEncoderGA, self).__init__()
+
+        self.algebra = algebra
+        self.layers = nn.ModuleList([
+            TransformerEncoderLayerGA(
+                algebra, embed_dim,hidden_dim
+            ) for _ in range(num_layers)
+        ])
+        # self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.pos_encoder = PositionalEncoding(embed_dim)
+
+    def forward(self, x, attention_mask=None):
+        # x = self.embedding(x)
+
+        x = self.pos_encoder(x)
+
+        for layer in self.layers:
+            x = layer(x, attention_mask)
+        return x

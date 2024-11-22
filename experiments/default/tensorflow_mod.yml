@@ -71,7 +71,7 @@ train:
   checkpoint_steps: 5000
   num_epochs: 2
   shuffle: true
-  summary_steps: 25
+  summary_steps: 500
   test_epochs: 1
   use_augmentation: true
 version: null

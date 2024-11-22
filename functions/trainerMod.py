@@ -47,15 +47,7 @@ class TrainerGA():
         
 
         #prova da cancellare immediatamente:
-        self.training=False
-        
-        
-
-       
-
-
-
-
+        # self.training=False
 
 
         self.renderer = MeshRenderer(self.options.dataset.camera_f, self.options.dataset.camera_c,
@@ -64,7 +56,28 @@ class TrainerGA():
         self.p2m = P2MModel(self.options.model, self.ellipsoid,
                                 self.options.dataset.camera_f, self.options.dataset.camera_c,
                                 self.options.dataset.mesh_pos).to(self.device)
+        
+
         self.ckpt_file = os.path.abspath(options.checkpoint)
+
+        checkpoint_p2m = self.load_checkpoint()
+        self.p2m.load_state_dict(checkpoint_p2m['model'],strict=False)
+        gcns_2= self.p2m.gcns[2]
+        gconv = self.p2m.gconv
+
+
+
+
+        # print("gcns_2 originale:")
+        # for name, param in gcns_2.named_parameters():
+        #     print(f"Parameter Name: {name}")
+        #     print(f"Shape: {param.size()}")
+        #     print(f"Values:\n{param.data}")
+
+        gcns_2_sd = gcns_2.state_dict()
+        gconv_sd = gconv.state_dict()
+
+
 
 
         #model parameters
@@ -80,12 +93,18 @@ class TrainerGA():
         self.epoch_count = 0
         self.step_count = 0
 
+
+
         self.model = ga_refinement(self.hidden_dim,
                                    self.features_dim,
                                    self.coord_dim,
                                    self.last_hidden_dim,
                                    self.ellipsoid,
-                                   self.options.model.gconv_activation).to(self.device)
+                                   self.options.model.gconv_activation,
+                                   self.p2m,
+                                   gcns_2_sd,
+                                   gconv_sd
+                                   ).to(self.device)
         
         
         self.dataset = self.load_dataset(options.dataset,training)
@@ -124,8 +143,11 @@ class TrainerGA():
 
 
     def train(self):
-        checkpoint_p2m = self.load_checkpoint()
-        self.p2m.load_state_dict(checkpoint_p2m['model'],strict=False)
+
+
+
+
+
         print("epoche train : ", self.options.train.num_epochs)
 
         flush_step = 500
@@ -237,34 +259,32 @@ class TrainerGA():
 
 
     def train_step(self,batch,out_pretrained):
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            x2 = out_pretrained['pred_coord'][1]
-            x = out_pretrained['my_var'][0]
-            x_hidden = out_pretrained['my_var'][1]
+        # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+        x2 = out_pretrained['pred_coord'][1]
+        x_hidden = out_pretrained['my_var'][0]
 
-            x4 = self.model(x,x2,x_hidden)
-
+        x4 = self.model(x2,x_hidden,batch['images'])
 
 
-            out = {
-                "pred_coord": [out_pretrained['pred_coord'][0], out_pretrained['pred_coord'][1], x4],
-                "pred_coord_before_deform": [out_pretrained['pred_coord_before_deform'][0], out_pretrained['pred_coord_before_deform'][1], out_pretrained['pred_coord_before_deform'][2]],
-                "reconst": out_pretrained['reconst']}
+        out = {
+            "pred_coord": [out_pretrained['pred_coord'][0], out_pretrained['pred_coord'][1], x4],
+            "pred_coord_before_deform": [out_pretrained['pred_coord_before_deform'][0], out_pretrained['pred_coord_before_deform'][1], out_pretrained['pred_coord_before_deform'][2]],
+            "reconst": out_pretrained['reconst']}
 
 
-            #compute loss
-            loss,loss_summary = self.criterion(out,batch)
-            self.losses.update(loss.detach().cpu().item())
+        #compute loss
+        loss,loss_summary = self.criterion(out,batch)
+        self.losses.update(loss.detach().cpu().item())
 
-            #backpropagation
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+        #backpropagation
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
         #RESULT ON PERFORMANCE 
-        if self.step_count % 50 == 0:
-            print("risultati performance di un train step: ", end='')
-            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+        # if self.step_count % 50 == 0:
+        #     print("risultati performance di un train step: ", end='')
+        #     print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
 
         return recursive_detach(out), recursive_detach(loss_summary)
@@ -275,13 +295,13 @@ class TrainerGA():
 
         #run inference
         with torch.no_grad():
-            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as pre_prof:
-                images = input_batch['images']
-                out = self.p2m(images)
+            # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as pre_prof:
+            images = input_batch['images']
+            out = self.p2m(images)
 
-        if self.step_count % 50 == 0:
-            print("Risultati sul pretrained step: ", end='')
-            print(pre_prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+        # if self.step_count % 50 == 0:
+        #     print("Risultati sul pretrained step: ", end='')
+        #     print(pre_prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
         return out
     
 
@@ -308,7 +328,7 @@ class TrainerGA():
             self.options.train.num_epochs * len(self.dataset) // (
                         self.options.train.batch_size * self.options.num_gpus),
             self.time_elapsed, self.losses.val, self.losses.avg))
-    
+        print(f"epoch: {self.epoch_count}, step: {self.step_count}, loss: {self.losses.val}, loss_avg: {self.losses.avg }")
 
 
     def load_checkpoint(self):

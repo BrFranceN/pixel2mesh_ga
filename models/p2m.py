@@ -71,7 +71,7 @@ class P2MModel(nn.Module):
 
         # GCN Block 3
         x = self.projection(img_shape, img_feats, x2)
-        x_tmp = x.clone().detach()
+        # x_tmp = x #questo va riottenuto!
         x = self.unpooling[1](torch.cat([x, x_hidden], 2))
         x3, _ = self.gcns[2](x)
         if self.gconv_activation:
@@ -88,7 +88,7 @@ class P2MModel(nn.Module):
             "pred_coord": [x1, x2, x3],
             "pred_coord_before_deform": [init_pts, x1_up, x2_up],
             "reconst": reconst,
-            "my_var":[x_tmp,x_hidden]
+            "my_var":[x_hidden]
         }
 
 
