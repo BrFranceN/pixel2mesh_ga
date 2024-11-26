@@ -23,10 +23,13 @@ def parse_args():
     # training
     parser.add_argument('--batch-size', help='batch size', type=int)
     parser.add_argument('--checkpoint', help='checkpoint file', type=str)
+    parser.add_argument('--checkpoint_ga', help='checkpoint file of refinement', type=str)
     parser.add_argument('--num-epochs', help='number of epochs', type=int)
+    parser.add_argument('--my_epoch_count', help='number of epochs from which resume', type=int)
+    parser.add_argument('--my_step_count', help='number of step_count from which resume', type=int)
     parser.add_argument('--version', help='version of task (timestamp by default)', type=str)
-    parser.add_argument('--name', required=True, type=str)
-
+    parser.add_argument('--name', required=True, type=str) 
+    parser.add_argument('--from_checkpoint', type=bool) 
     args = parser.parse_args()
 
     return args
@@ -34,10 +37,22 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if hasattr(args, "from_checkpoint") and args.from_checkpoint:
+        from_checkpoint = True
+    else:
+        from_checkpoint = False
+
+
     logger, writer = reset_options(options, args)
+    #TODO REMOVE CHECKING
+    # print(from_checkpoint)
+    # print(type(from_checkpoint))
+    # print(options.my_epoch_count)
+    # print(options.my_step_count)
+    # exit()
     #logger -> used to see the messages
     #writer -> used to save data of training
-    trainer = TrainerGA(options, logger, writer)
+    trainer = TrainerGA(options, logger, writer,from_checkpoint=from_checkpoint)
     trainer.train()
 
 

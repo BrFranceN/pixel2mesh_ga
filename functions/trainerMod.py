@@ -37,14 +37,20 @@ from tqdm import tqdm
 
 
 class TrainerGA():
-    def __init__(self,options,logger,summary_writer,training=True):
+    def __init__(self,options,logger,summary_writer,training=True,from_checkpoint=False):
         self.options = options
         self.logger = logger
         self.summary_writer = summary_writer
         self.training = training
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.min_loss = torch.tensor(float('inf'))
-        
+
+        if from_checkpoint:
+            self.my_epoch_count = self.options.my_epoch_count
+            self.my_step_count = self.options.my_step_count
+        else:
+            self.my_epoch_count = 0
+            self.my_step_count = 0        
 
         #prova da cancellare immediatamente:
         # self.training=False
@@ -74,8 +80,14 @@ class TrainerGA():
         #     print(f"Shape: {param.size()}")
         #     print(f"Values:\n{param.data}")
 
-        gcns_2_sd = gcns_2.state_dict()
-        gconv_sd = gconv.state_dict()
+
+        if from_checkpoint == False:
+            gcns_2_sd = gcns_2.state_dict()
+            gconv_sd = gconv.state_dict()
+        else:
+            gcns_2_sd = None
+            gconv_sd = None
+
 
 
 
@@ -109,8 +121,12 @@ class TrainerGA():
         
         self.dataset = self.load_dataset(options.dataset,training)
         self.dataset_collate_fn = self.load_collate_fn(options.dataset,training)
+
+
         
 
+
+       
         if self.options.optim.name == "adam":
             self.optimizer = torch.optim.Adam(
                 params=list(self.model.parameters()),
@@ -130,6 +146,18 @@ class TrainerGA():
         self.lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
             self.optimizer, self.options.optim.lr_step, self.options.optim.lr_factor
         )
+
+        if from_checkpoint:
+            #load checkpoint ga model
+            self.checkpoint_file_ga = os.path.abspath(options.checkpoint_ga)
+            self.logger.info("FROM CHECKPOINT MODE: %s" % self.checkpoint_file_ga)
+            checkpoint_ga = torch.load(self.checkpoint_file_ga,encoding="bytes")
+            self.model.load_state_dict(checkpoint_ga['model'],strict=False)
+            self.optimizer.load_state_dict(checkpoint_ga['optimizer'])
+            # print(self.my_epoch_count)
+            # print("Optimizer state_dict keys:", self.optimizer.state_dict().keys())
+            # print("Optimizer param_groups:", self.optimizer.state_dict()["param_groups"])
+            # print("Optimizer state:", self.optimizer.state_dict()["state"])
 
         self.criterion = P2MLoss(self.options.loss,self.ellipsoid).to(self.device)
         self.losses = AverageMeter()
@@ -212,12 +240,12 @@ class TrainerGA():
 
     def my_save_checkpoint(self):
         obj = ({
-            'epoch':self.epoch_count,
-            "total_step_count": self.step_count,
+            'epoch':self.epoch_count + self.my_epoch_count,
+            "total_step_count": self.step_count + self.my_step_count, 
             'model_name':"ga_refinement",
             'model':self.model.state_dict(),
             'optimizer':self.optimizer.state_dict()})
-        name = "%06d_%06d" % (self.step_count, self.epoch_count)  
+        name = "%06d_%06d" % (self.step_count + self.my_step_count, self.epoch_count + self.my_epoch_count)  
         complete_path = os.path.join(self.options.checkpoint_dir, "%s.pt" % name)
         self.logger.info("Dumping to checkpoint file: %s" % complete_path)
         torch.save(obj, complete_path)

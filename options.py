@@ -30,6 +30,8 @@ options.checkpoint = None
 #GA parameters 
 options.checkpoint_dir_ga = 'checkpoints_ga'
 options.checkpoint_ga = None
+options.my_epoch_count = None
+options.my_step_count = None
 
 #dataset parameters
 options.dataset = edict()
@@ -188,6 +190,12 @@ def reset_options(options, args, phase='train'):
     #attributes for GA 
     if hasattr(args, "checkpoint_ga") and args.checkpoint_ga:
         options.checkpoint_ga = args.checkpoint_ga
+    if hasattr(args, "my_epoch_count") and args.my_epoch_count:
+        options.my_epoch_count = args.my_epoch_count
+    if hasattr(args, "my_step_count") and args.my_step_count:
+        options.my_step_count = args.my_step_count
+
+   
 
 
     options.name = args.name

@@ -75,3 +75,6 @@ train:
   test_epochs: 1
   use_augmentation: true
 version: null
+# My options
+my_step_count: 43784
+my_epoch_count: 2

@@ -121,6 +121,7 @@ datasets/originalExamples
 summary
 checkpoints
 checkpoints_ga
+geometric-algebra-transformer
 
 # IDEA
 .idea
