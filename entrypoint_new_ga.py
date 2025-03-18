@@ -1,11 +1,12 @@
-import argparse
-import sys
 import os 
-# from functions.trainer import Trainer
-from functions.trainerMod import TrainerGA
-from options import update_options, options, reset_options
+import sys
+# sys.path.append('geometric-algebra-transformer')
 
-import wandb
+from models.layers.new_ga_refinement import New_ga_refinement
+
+
+import argparse
+from options import update_options, options, reset_options
 
 
 
@@ -22,7 +23,7 @@ def parse_args():
         # load the configuration from the file 'options' inserted
         update_options(args.options)
 
-    # trainingwandb.finish()  # Finalize W&B logging for this run
+    # training
     parser.add_argument('--batch-size', help='batch size', type=int)
     parser.add_argument('--checkpoint', help='checkpoint file', type=str)
     parser.add_argument('--checkpoint_ga', help='checkpoint file of refinement', type=str)
@@ -46,17 +47,8 @@ def main():
 
 
     logger, writer = reset_options(options, args)
-    #TODO REMOVE CHECKING
-    # print(from_checkpoint)
-    # print(type(from_checkpoint))
-    # print(options.my_epoch_count)
-    # print(options.my_step_count)
-    # exit()
-    #logger -> used to see the messages
-    #writer -> used to save data of training
-    trainer = TrainerGA(options, logger, writer,from_checkpoint=from_checkpoint)
-    trainer.train()
-    wandb.finish()  # Finalize W&B logging for this run
+    prova = New_ga_refinement(options)
+
 
 
 if __name__ == "__main__":

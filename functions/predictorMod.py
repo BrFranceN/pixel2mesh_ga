@@ -94,7 +94,8 @@ class PredictorGA():
             x2 = out_tmp['pred_coord'][1]
             # x = out_tmp['my_var'][0]
             x_hidden = out_tmp['my_var'][0]
-            x4 =  self.model(x2,x_hidden,images)
+            # x4 =  self.model(x2,x_hidden,images) 
+            x4 = self.model(out_tmp,images) 
 
             out = {
                 "pred_coord": [out_tmp['pred_coord'][0], out_tmp['pred_coord'][1], x4],

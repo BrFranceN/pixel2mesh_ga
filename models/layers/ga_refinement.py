@@ -12,6 +12,9 @@ from models.layers.gconv import GConv
 from models.layers.selfattention_ga import SelfAttentionGA
 from models.layers.selfattention_ga import TransformerEncoderGA
 from algebra.cliffordalgebra import CliffordAlgebra
+# from models.layers.ga_transformer import GA_transformer  # Only GATR version
+# from gatr.interface import embed_point, extract_scalar
+from models.layers.mlp_deformer import VertexDeformer
 
 class ga_refinement(nn.Module):
     def __init__(self,  
@@ -36,30 +39,19 @@ class ga_refinement(nn.Module):
         self.nn_encoder = deepcopy(source_model.nn_encoder)
         self.nn_decoder = deepcopy(source_model.nn_decoder) # to use in case of debug to visualize features
         self.projection = deepcopy(source_model.projection)
-        self.unpooling = deepcopy((source_model.unpooling[1]))
-
+        self.unpooling = deepcopy((source_model.unpooling))
 
         
-
-
-        self.gconv_initial = GConv(in_features=self.features_dim + self.hidden_dim + 8, out_features=self.features_dim + self.hidden_dim,adj_mat=ellipsoid.adj_mat[2])
-        self.gconv = GConv(in_features=self.last_hidden_dim, out_features=self.coord_dim,
-                           adj_mat=ellipsoid.adj_mat[2])
         
 
         self.gcns = GBottleneck(6, self.features_dim + self.hidden_dim, self.hidden_dim, self.last_hidden_dim,
-                ellipsoid.adj_mat[2], activation=self.gconv_activation)
+                ellipsoid.adj_mat[2], activation=self.gconv_activation,use_mod=None )
         
-
-
-
-
-
-        # print("gcns prima del load ")
-        # for name, param in self.gcns.named_parameters():
-        #     print(f"Parameter Name: {name}")
-        #     print(f"Shape: {param.size()}")
-        #     print(f"Values:\n{param.data}")
+        self.gcns = GBottleneck(6, self.features_dim + self.hidden_dim, self.hidden_dim, self.last_hidden_dim,
+                ellipsoid.adj_mat[2], activation=self.gconv_activation,use_mod=None )
+        
+        self.gconv = GConv(in_features=self.last_hidden_dim, out_features=self.coord_dim,
+                           adj_mat=ellipsoid.adj_mat[2])
 
 
 
@@ -72,64 +64,81 @@ class ga_refinement(nn.Module):
             self.gconv.load_state_dict(gconv_sd)
 
 
-        # print("gcns dopo il load ")
-        # for name, param in self.gcns.named_parameters():
-        #     print(f"Parameter Name: {name}")
-        #     print(f"Shape: {param.size()}")
-        #     print(f"Values:\n{param.data}")
-        
-        # print("quello da caricare")
-        # for name, param in self.gconv.named_parameters():
-        #     print(f"Parameter Name: {name}")
-        #     print(f"Shape: {param.size()}")
-            # print(f"Values:\n{param.data}")
-        
-        #new (indeciso tra questo oppure un MLP)
-        # sono queste che hanno parametri trainabili
-
-        # self.gcns = GBottleneck(6, self.features_dim + self.hidden_dim + 8, self.hidden_dim, self.last_hidden_dim,
-        #                 ellipsoid.adj_mat[2], activation=self.gconv_activation)
-
-        # self.unpooling = GUnpooling(ellipsoid.unpool_idx[1])
-    
-        algebra_dim = 3
-        metric = [1 for _ in range(algebra_dim)]
-        self.algebra = CliffordAlgebra(metric)
-        embed_dim = 2**algebra_dim
-        hidden_dim = 256
-        self.self_attention_ga = SelfAttentionGA(self.algebra,embed_dim,hidden_dim)
-        self.transformerEncoding= TransformerEncoderGA(self.algebra,embed_dim, hidden_dim,1)
 
 
-    def forward(self,x2,x_hidden,img):
+    def forward(self,out_pretrained,img):
         img_feats = self.nn_encoder(img)
         img_shape = self.projection.image_feature_shape(img)
-        x = self.projection(img_shape, img_feats, x2)
+
+        x2 = out_pretrained['pred_coord'][1]
+        x_hidden = out_pretrained['my_var'][0]
 
 
 
-        x2_mv = self.algebra.embed_grade(x2,1)
-        x2_result = self.transformerEncoding(x2_mv)
-        
-
-        x_new = self.unpooling(torch.cat([x, x_hidden,x2_result], 2))
-
-        # print("x_new shape",x_new.shape)
-        x_new_2 = self.gconv_initial(x_new)
-        # print("x_new2shape",x_new_2.shape)
-
-        x4,x4_hidden_final = self.gcns(x_new_2)
-
-        # print("x4.shape ", x4.shape )
-
+        # GCN Block 3
+        x_unpooling_3 = self.projection(img_shape, img_feats, x2)
+        # x_tmp = x #questo va riottenuto!
+        x_unpooling_3 = self.unpooling[1](torch.cat([x_unpooling_3, x_hidden], 2))
+        x3, _ = self.gcns(x_unpooling_3)
         if self.gconv_activation:
-            x4 = F.relu(x4)
+            x3 = F.relu(x3)
+        # after deformation 3
+        x3 = self.gconv(x3)
+
+
+
+
+        return x3
+
+
+
+
+
+
+
+
+class refinement(nn.Module):
+    def __init__(self,  
+        hidden_dim,
+        features_dim, 
+        coord_dim, 
+        last_hidden_dim,
+        ellipsoid,
+        gconv_activation,
+        source_model,
+        gcn2_sd = None,
+        gconv_sd = None):
+        super(refinement,self).__init__()
+
+        self.hidden_dim = hidden_dim
+        self.coord_dim = coord_dim
+        self.last_hidden_dim = last_hidden_dim
+        self.gconv_activation = gconv_activation
+        self.features_dim = features_dim
+
+        self.gconv_initial = GConv(in_features=self.features_dim + self.hidden_dim + 8, out_features=self.features_dim + self.hidden_dim,adj_mat=ellipsoid.adj_mat[1])
+        self.gconv = GConv(in_features=self.last_hidden_dim, out_features=self.coord_dim,
+                           adj_mat=ellipsoid.adj_mat[2])
         
-        x4 = self.gconv(x4)
-        # print("x4.shape ", x4.shape )
+
+        self.gcns = GBottleneck(6, self.features_dim + self.hidden_dim, self.hidden_dim, self.last_hidden_dim,
+                ellipsoid.adj_mat[2], activation=self.gconv_activation)
+
+        if gcn2_sd is not None:
+            print("preload gcn2_sd ")
+            self.gcns.load_state_dict(gcn2_sd)
+
+        if gconv_sd is not None:
+            print("preload gconv_sd ")
+            self.gconv.load_state_dict(gconv_sd)
 
 
-        return x4
+    def forward(self,x3):
+        new_x3, new_hidden =  self.gcns(x3)
 
+        new_x3 = F.relu(new_x3)
+        new_x3 = self.gconv(new_x3)
+
+        return new_x3
         
         

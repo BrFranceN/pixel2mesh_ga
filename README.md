@@ -1,1 +1,3 @@
 # pixel2mesh_ga
+This work encompasses enhancements to the Pixel2Mesh framework by integrating advanced geometric algebra techniques for superior 3D mesh reconstruction from single images. Two pivotal modules, MVFormer and GATr (Geometric Algebra Transformer), are integrated to augment the feature extraction and processing capabilities of the conventional Pixel2Mesh model. As a secondary approach, this research explores the creation of a new loss, based on the geometric algebra framework. Specifically, two types of loss have been developed: a geometric algebra (GA) loss that utilizes $G_{3,0,0}$ and a projective geometric algebra (PGA) loss that employs $G_{3,0,1}$, both aimed at refining the accuracy and detail of the mesh reconstruction process.
+

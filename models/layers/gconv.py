@@ -12,8 +12,12 @@ class GConv(nn.Module):
     Similar to https://arxiv.org/abs/1609.02907
     """
 
-    def __init__(self, in_features, out_features, adj_mat, bias=True):
+    #Added params by me:
+    # - print 
+
+    def __init__(self, in_features, out_features, adj_mat, bias=True, stampa=False):
         super(GConv, self).__init__()
+        self.stampa = stampa # TODO DELETE
         self.in_features = in_features
         self.out_features = out_features
 
@@ -33,13 +37,18 @@ class GConv(nn.Module):
         nn.init.xavier_uniform_(self.loop_weight.data)
 
     def forward(self, inputs):
-        # print(f"inputs in gconv: ",inputs.shape)
         support = torch.matmul(inputs, self.weight)
-        # print(f"support in gconv: ",support.shape)
         support_loop = torch.matmul(inputs, self.loop_weight)
-        # print(f"support_loop in gconv: ",support_loop.shape)
         output = dot(self.adj_mat, support, True) + support_loop
-        # print(f"output in gconv: ",output.shape)
+        if(self.stampa):
+            print(f"inputs in gconv: ",inputs.shape)
+            print(f"weight in gconv: ",self.weight.shape)
+            print(f"support in gconv: ",support.shape)
+            print(f"support_loop in gconv: ",support_loop.shape)
+            print(f"output in gconv: ",output.shape)  
+            print(f"bias shape ", self.bias.shape)
+
+
         if self.bias is not None:
             ret = output + self.bias
         else:
@@ -51,5 +60,10 @@ class GConv(nn.Module):
         return self.__class__.__name__ + ' (' \
                + str(self.in_features) + ' -> ' \
                + str(self.out_features) + ')'
+    
+
+
+# class GA_GConv(nn.module):
+#     pass
 
 

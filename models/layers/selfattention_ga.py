@@ -7,11 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 import math
-
-
-
 class MVLinear(nn.Module):
 
     def __init__(
@@ -149,6 +145,7 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
         self,
         algebra,
         features,
+        seq_length = 618
     ):
         """
         Fully connected steerable geometric product layer: a nn Module used to compute pairwise geometric products
@@ -163,46 +160,37 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
         self.features = features # prima c'era features
 
 
-        self.normalization = NormalizationLayer(algebra, features)
-        #TODO MODIFY 618 -> NUMBER OF VECTOR
-        self.q_prj = MVLinear(algebra, 618, 618)
-        self.k_prj = MVLinear(algebra, 618, 618)
+        # self.normalization = NormalizationLayer(algebra, features) # doens't work well.
+        self.normalization = nn.LayerNorm(features)
+        self.q_prj = MVLinear(algebra, seq_length, seq_length)
+        self.k_prj = MVLinear(algebra, seq_length, seq_length)
 
     # @torch.jit.script
     def forward(self, input):
         batch, seq, dim = input.shape
 
         # mv projection
-        q = self.q_prj(input)
-        k = self.k_prj(input)
+        q = self.normalization(self.q_prj(input))
+        k = self.normalization(self.k_prj(input))
 
         # print("input shape:", input.shape)
         # print("q shape : ",q.shape)
         # print("k shape : ",k.shape)
 
-        # mv normalization
-        q = self.normalization(q)
-        k = self.normalization(k)
+        # dimention adjustments AND make tensor contigous in memory for performance optimization
+        cayley = self.algebra.cayley.to(input.device).contiguous() # [dim, dim, dim]
+        q_einsum = q.unsqueeze(2).contiguous().half()  # [batch, seq, 1, dim]
+        k_einsum = k.unsqueeze(1).contiguous().half()  # [batch, 1, seq, dim]
+        cayley = cayley.contiguous().half()
 
-        # dimention adjustments
-        cayley = self.algebra.cayley.to(input.device) # [dim, dim, dim]
-        q_einsum = q.unsqueeze(2)  # [batch, seq, 1, dim]
-        k_einsum = k.unsqueeze(1)  # [batch, 1, seq, dim]
-
-        # make tensor contigous in memory for performance optimization
-        q_einsum = q_einsum.contiguous()
-        k_einsum = k_einsum.contiguous()
-        cayley = cayley.contiguous()
-
-        # half precision for performance optimization
-        q = q.half()
-        k = k.half()
-        cayley = cayley.half()
 
         # serve as context managers or decorators that allow regions
         # of the script to run in mixed precision
         with torch.amp.autocast('cuda'):
             output = fast_einsum(q_einsum, cayley, k_einsum)
+
+
+        return output.float()
             
 
         """
@@ -235,7 +223,7 @@ class FullyConnectedSteerableGeometricProductLayer(nn.Module):
 
 
 class GeometricProductAttention(nn.Module):
-    def __init__(self, algebra, embed_dim,hidden_dim):
+    def __init__(self, algebra, embed_dim,hidden_dim,seq_length=618):
         """
         Self-Attention layer using geometric algebra operation.
 
@@ -245,11 +233,10 @@ class GeometricProductAttention(nn.Module):
         """
         super(GeometricProductAttention, self).__init__()
 
-        
 
         self.algebra = algebra
         self.subspaces_dims = algebra.subspaces
-        self.gp_layer = FullyConnectedSteerableGeometricProductLayer(algebra, embed_dim)
+        self.gp_layer = FullyConnectedSteerableGeometricProductLayer(algebra, embed_dim,seq_length)
 
         # define projection layers for each subspace (legacy)
         # self.layers = nn.ModuleList([
@@ -298,23 +285,27 @@ class GeometricProductAttention(nn.Module):
         # print(f"result shape: {result.shape}")
 
         # apply attention score projection
-        output = self.att_prj(new_mv.float())
+        with torch.amp.autocast('cuda'):
+            output = self.att_prj(new_mv.float())
+
+            
         # print("output att_prj :",output.shape)
         
 
         # end = time.time()
         # print(f"attention score computation in {end - start:.4f} seconds") # attention operation time
+        return self.dropout(output.float())
 
-        return output
 
 
+#TODO LOOK AGAIN 
 class SelfAttentionGA(nn.Module):
-    def __init__(self, algebra, embed_dim,hidden_dim):
+    def __init__(self, algebra, embed_dim,hidden_dim,seq_length):
         super(SelfAttentionGA, self).__init__()
 
         self.algebra = algebra
-        self.ga_attention = GeometricProductAttention(algebra, embed_dim,hidden_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)# Before
+        self.ga_attention = GeometricProductAttention(algebra, embed_dim,hidden_dim,seq_length)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)# Before TODO understand if right
         # self.v_proj = MVLinear(algebra,618, embed_dim) 
 
     def forward(self, x, attention_mask=None):
@@ -335,8 +326,6 @@ class SelfAttentionGA(nn.Module):
             attn_scores = attn_scores.masked_fill(attention_mask == 0, float('-inf'))
 
         attn_probs = torch.softmax(attn_scores, dim=-1)
-
-    
         
 
         # apply attention to values tensor
@@ -345,28 +334,28 @@ class SelfAttentionGA(nn.Module):
 
 
 class TransformerEncoderLayerGA(nn.Module):
-    def __init__(self, algebra, embed_dim, hidden_dim):
+    def __init__(self, algebra, embed_dim, hidden_dim,seq_length = 618):
         super(TransformerEncoderLayerGA, self).__init__()
 
-        self.self_attn = SelfAttentionGA(algebra, embed_dim,hidden_dim)
+        self.self_attn = SelfAttentionGA(algebra, embed_dim,hidden_dim,seq_length)
         # feed forward network
         self.norm1 = nn.LayerNorm(embed_dim)
         self.fc_in = nn.Linear(embed_dim, hidden_dim)
-        self.activation = nn.GELU()
+        # self.activation = nn.GELU() # TODO GELU OR RELU? in p2m is used ReLU
+        self.activation = nn.ReLU() # TODO GELU OR RELU?
         self.fc_out = nn.Linear(hidden_dim, embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(p=0.1)
 
     def forward(self, x, attention_mask=None):
         attn_out = self.self_attn(self.norm1(x), attention_mask)
-        x = x + attn_out
+        x = x + self.dropout(attn_out)
 
         # feed-forward
-        ff_out = self.fc_in(x)
-        ff_out = self.activation(ff_out)
-        ff_out = self.fc_out(ff_out)
+        ff_out = self.fc_out(self.activation(self.fc_in(x)))
 
         # residual and normalization
-        x = x + ff_out
+        x = x + self.dropout(ff_out)
         x = self.norm2(x)
         # we are here yheeee!!!
         return x
@@ -390,13 +379,13 @@ class PositionalEncoding(torch.nn.Module):
 
 
 class TransformerEncoderGA(nn.Module):
-    def __init__(self, algebra, embed_dim, hidden_dim, num_layers):
+    def __init__(self, algebra, embed_dim, hidden_dim, num_layers,seq_length=618):
         super(TransformerEncoderGA, self).__init__()
 
         self.algebra = algebra
         self.layers = nn.ModuleList([
             TransformerEncoderLayerGA(
-                algebra, embed_dim,hidden_dim
+                algebra, embed_dim,hidden_dim,seq_length
             ) for _ in range(num_layers)
         ])
         # self.embedding = nn.Embedding(vocab_size, embed_dim)
@@ -410,3 +399,68 @@ class TransformerEncoderGA(nn.Module):
         for layer in self.layers:
             x = layer(x, attention_mask)
         return x
+    
+
+
+class TransformerDecoderLayerGA(nn.Module):
+    def __init__(self, algebra, embed_dim, hidden_dim, seq_length):
+        super().__init__()
+        self.self_att = SelfAttentionGA(algebra,embed_dim,hidden_dim,seq_length)
+        self.cross_att = SelfAttentionGA(algebra,embed_dim,hidden_dim,seq_length)
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim) 
+        self.norm3 = nn.LayerNorm(embed_dim) 
+        self.fc_in = nn.Linear(embed_dim,hidden_dim)
+        self.activation = nn.ReLU()
+        self.fc_out = nn.Linear(hidden_dim,embed_dim)
+        self.dropout = nn.Dropout(p=0.1)
+
+        def forward(self,tgt,memory):
+            tgt2 = self.self_attn(self.norm1(tgt))
+            tgt = tgt + self.dropout(tgt2)
+            tgt2 = self.cross_attn(self.norm2(tgt), memory)
+            tgt = tgt + self.dropout(tgt2)
+            tgt2 = self.fc_out(self.activation(self.fc_in(tgt)))
+            tgt = tgt + self.dropout(tgt2)
+            return self.norm3(tgt)
+        
+
+class TransformerDecoderGA(nn.Module):
+    def __init__(self, algebra_dim, embed_dim, hidden_dim, num_layers, seq_length):
+        super().__init__()
+        metric = [1 for _ in range(algebra_dim)]
+        self.algebra = CliffordAlgebra(metric)
+        self.layers = nn.ModuleList([
+            TransformerDecoderLayerGA(self.algebra, embed_dim, hidden_dim, seq_length)
+            for _ in range(num_layers)
+        ])
+        self.pos_encoder = PositionalEncoding(embed_dim)
+
+    def forward(self, tgt, memory):
+        tgt = self.algebra.embed_grade(tgt, 1)  # Geometric Algebra embedding
+        tgt = self.pos_encoder(tgt)
+        for layer in self.layers:
+            tgt = layer(tgt, memory)
+        return tgt
+
+
+class MVFormer(nn.Module):
+    def __init__(self, algebra_dim, embed_dim, hidden_dim, num_encoder_layers, num_decoder_layers, seq_length):
+        super().__init__()
+        self.decoder_layers = num_decoder_layers
+        self.encoder = TransformerEncoderGA(algebra_dim, embed_dim, hidden_dim, num_encoder_layers, seq_length)
+
+        if self.decoder_layers > 0:
+            self.decoder = TransformerDecoderGA(algebra_dim, embed_dim, hidden_dim, num_decoder_layers, seq_length)
+
+    def forward(self, src, tgt=None):
+
+        if self.decoder_layers > 0:
+            if not tgt: 
+                raise Exception(f"Invalid target: {tgt}")
+            memory = self.encoder(src)
+            output = self.decoder(tgt, memory)
+        else:
+            output = self.encoder(src)
+        return output
+    

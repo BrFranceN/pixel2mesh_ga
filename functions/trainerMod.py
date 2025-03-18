@@ -13,10 +13,10 @@ from torch.utils.data.dataloader import default_collate
 from models.p2m import P2MModel
 from models.losses.p2m import P2MLoss
 from models.backbones import get_backbone
-from models.layers.ga_refinement import ga_refinement
-
-
+from models.layers.ga_refinement import ga_refinement, refinement
+from models.layers.mlp_deformer import VertexDeformer
 from algebra.cliffordalgebra import CliffordAlgebra
+
 
 
 from utils.average_meter import AverageMeter
@@ -32,18 +32,29 @@ from datasets.shapenet import ShapeNet, get_shapenet_collate, ShapeNetImageFolde
 import config
 from tqdm import tqdm
 
+import wandb #track the training
+
 
 
 
 
 class TrainerGA():
-    def __init__(self,options,logger,summary_writer,training=True,from_checkpoint=False):
+    def __init__(self,options,logger,summary_writer,training=True,from_checkpoint=False,mlp=False,refinement=False):
         self.options = options
         self.logger = logger
         self.summary_writer = summary_writer
         self.training = training
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.min_loss = torch.tensor(float('inf'))
+        self.mlp = mlp
+        self.refinement = refinement
+
+
+
+        if self.mlp:
+            self.mlp_deformer = VertexDeformer()
+
+
 
         if from_checkpoint:
             self.my_epoch_count = self.options.my_epoch_count
@@ -80,13 +91,18 @@ class TrainerGA():
         #     print(f"Shape: {param.size()}")
         #     print(f"Values:\n{param.data}")
 
+        #TODO PENSARE BENE QUANDO CARICARE O NO I PESI
+        # if from_checkpoint == False:
+        #     gcns_2_sd = gcns_2.state_dict()
+        #     gconv_sd = gconv.state_dict()
+        # else:
+        #     gcns_2_sd = None
+        #     gconv_sd = None
 
-        if from_checkpoint == False:
-            gcns_2_sd = gcns_2.state_dict()
-            gconv_sd = gconv.state_dict()
-        else:
-            gcns_2_sd = None
-            gconv_sd = None
+
+        print("load old weight p2m")
+        gcns_2_sd = gcns_2.state_dict()
+        gconv_sd = gconv.state_dict()
 
 
 
@@ -106,17 +122,32 @@ class TrainerGA():
         self.step_count = 0
 
 
+        if self.mlp:
+            self.model = self.mlp_deformer.to(self.device)
+        elif self.refinement:
+            self.model = refinement(self.hidden_dim,
+                                    self.features_dim,
+                                    self.coord_dim,
+                                    self.last_hidden_dim,
+                                    self.ellipsoid,
+                                    self.options.model.gconv_activation,
+                                    self.p2m,
+                                    gcns_2_sd,
+                                    gconv_sd
+                                    ).to(self.device)
 
-        self.model = ga_refinement(self.hidden_dim,
-                                   self.features_dim,
-                                   self.coord_dim,
-                                   self.last_hidden_dim,
-                                   self.ellipsoid,
-                                   self.options.model.gconv_activation,
-                                   self.p2m,
-                                   gcns_2_sd,
-                                   gconv_sd
-                                   ).to(self.device)
+        else:
+            self.model = ga_refinement(self.hidden_dim,
+                                    self.features_dim,
+                                    self.coord_dim,
+                                    self.last_hidden_dim,
+                                    self.ellipsoid,
+                                    self.options.model.gconv_activation,
+                                    self.p2m,
+                                    gcns_2_sd,
+                                    gconv_sd
+                                    ).to(self.device)
+        
         
         
         self.dataset = self.load_dataset(options.dataset,training)
@@ -149,11 +180,14 @@ class TrainerGA():
 
         if from_checkpoint:
             #load checkpoint ga model
-            self.checkpoint_file_ga = os.path.abspath(options.checkpoint_ga)
-            self.logger.info("FROM CHECKPOINT MODE: %s" % self.checkpoint_file_ga)
-            checkpoint_ga = torch.load(self.checkpoint_file_ga,encoding="bytes")
-            self.model.load_state_dict(checkpoint_ga['model'],strict=False)
-            self.optimizer.load_state_dict(checkpoint_ga['optimizer'])
+            if (options.checkpoint_ga is not None):
+                self.checkpoint_file_ga = os.path.abspath(options.checkpoint_ga)
+                self.logger.info("FROM CHECKPOINT MODE: %s" % self.checkpoint_file_ga)
+                checkpoint_ga = torch.load(self.checkpoint_file_ga,encoding="bytes")
+                self.model.load_state_dict(checkpoint_ga['model'],strict=False)
+                self.optimizer.load_state_dict(checkpoint_ga['optimizer'])
+            else:
+                print("no check point ga found")
             # print(self.my_epoch_count)
             # print("Optimizer state_dict keys:", self.optimizer.state_dict().keys())
             # print("Optimizer param_groups:", self.optimizer.state_dict()["param_groups"])
@@ -166,19 +200,29 @@ class TrainerGA():
         #training parameters
         self.time_start = time.time()
 
+        # try to track training
+        # Initialize W&B
+        wandb.init(
+            project="MV_FORMER",
+            config={
+                "learning_rate": options.optim.lr,
+                "batch_size": options.train.batch_size,
+                "num_epochs": options.train.num_epochs,
+                "optimizer": options.optim.name,
+                # Add more as needed
+            },
+            name="New_loss_2"
+        )
+
 
         
 
 
     def train(self):
 
-
-
-
-
         print("epoche train : ", self.options.train.num_epochs)
 
-        flush_step = 500
+        flush_step = 50
        
 
         # Create a new data loader for every epoch
@@ -230,6 +274,7 @@ class TrainerGA():
             # loss_values.append(self.losses.val / self.options.train.batch_size)
             if (self.losses.val < self.min_loss):
                 self.my_save_checkpoint()
+                # self.min_loss = self.losses.val # TODO THIS IS THE FIX, DECOMMENT
             else:
                 print("Loss bigger than before, saving skip ")
             self.lr_scheduler.step()
@@ -249,6 +294,11 @@ class TrainerGA():
         complete_path = os.path.join(self.options.checkpoint_dir, "%s.pt" % name)
         self.logger.info("Dumping to checkpoint file: %s" % complete_path)
         torch.save(obj, complete_path)
+
+
+        # Save checkpoint to W&B
+        wandb.save(complete_path)
+        wandb.log({"best_loss": self.min_loss.item()})
 
 
 
@@ -272,26 +322,27 @@ class TrainerGA():
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def train_step(self,batch,out_pretrained):
         # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         x2 = out_pretrained['pred_coord'][1]
         x_hidden = out_pretrained['my_var'][0]
+        mesh3 = out_pretrained['pred_coord'][2]
+        # ultimate_x = out_pretrained['my_var'][1]
 
-        x4 = self.model(x2,x_hidden,batch['images'])
+
+        # here select the model 
+        # if self.mlp:
+        #     x4 = self.model(mesh3)
+        # elif self.refinement:
+        #     pass
+        #     # x4 = self.model(ultimate_x)
+        # else:
+        #     x4 = self.model(x2,x_hidden,batch['images']) # old forward
+        #     # x4 = self.model(out_pretrained,batch['images']) # new forward
+
+
+        x4 = self.model(out_pretrained,batch['images'])
+
 
 
         out = {
@@ -303,6 +354,10 @@ class TrainerGA():
         #compute loss
         loss,loss_summary = self.criterion(out,batch)
         self.losses.update(loss.detach().cpu().item())
+
+        # print("loss ", loss)
+        # print("loss_summary ", loss_summary)
+
 
         #backpropagation
         self.optimizer.zero_grad()
@@ -357,6 +412,15 @@ class TrainerGA():
                         self.options.train.batch_size * self.options.num_gpus),
             self.time_elapsed, self.losses.val, self.losses.avg))
         print(f"epoch: {self.epoch_count}, step: {self.step_count}, loss: {self.losses.val}, loss_avg: {self.losses.avg }")
+
+
+
+        wandb.log({
+                "epoch": self.epoch_count,
+                "step": self.step_count,
+                "loss": self.losses.val,
+                "loss_avg": self.losses.avg
+            })
 
 
     def load_checkpoint(self):
